@@ -1,0 +1,11 @@
+{
+	"id": "obsidian-relay-sync",
+	"name": "Relay Sync",
+	"version": "0.1.0",
+	"minAppVersion": "0.15.0",
+	"description": "Надежная и безопасная синхронизация между устройствами через сервер-маршрутизатор с E2E шифрованием",
+	"author": "Dima",
+	"authorUrl": "https://github.com/YOUR_GITHUB_USERNAME",
+	"fundingUrl": "",
+	"isDesktopOnly": false
+}
