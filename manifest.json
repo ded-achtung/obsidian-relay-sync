@@ -1,0 +1,11 @@
+{
+	"id": "obsidian-relay-sync",
+	"name": "Relay Sync",
+	"version": "1.0.0",
+	"minAppVersion": "0.15.0",
+	"description": "Reliable and secure synchronization between devices through a relay server with end-to-end encryption",
+	"author": "ded-achtung",
+	"authorUrl": "https://github.com/ded-achtung",
+	"fundingUrl": "",
+	"isDesktopOnly": false
+}
