@@ -1,6 +1,7 @@
 # Obsidian Relay Sync
 
 A plugin for Obsidian that provides reliable and secure synchronization between devices through a relay server.
+![image](https://github.com/user-attachments/assets/324ae887-b118-4f7b-9626-ad2ec32b3e2f)
 
 [По-русски](#русская-версия)
 
