@@ -277,6 +277,11 @@ export class RelayClient {
                     if (message.type === 'syncRequestSent') {
                         console.log("Запрос на синхронизацию отправлен");
                         
+                        // Запрашиваем обновление списка доверенных устройств
+                        setTimeout(() => {
+                            this.requestTrustedDevices();
+                        }, 500);
+                        
                         // Восстанавливаем оригинальный обработчик
                         this.onMessageCallback = this.onMessageCallbackOriginal;
                         
@@ -288,6 +293,16 @@ export class RelayClient {
                         this.onMessageCallback = this.onMessageCallbackOriginal;
                         
                         resolve(false);
+                    } else if (message.type === 'trustedDevices') {
+                        // Обрабатываем обновление списка доверенных устройств
+                        if (message.devices && Array.isArray(message.devices)) {
+                            this.handleTrustedDevicesUpdate(message.devices);
+                        } else if (message.payload) {
+                            this.handleTrustedDevicesUpdate(message.payload);
+                        }
+                        
+                        // Не восстанавливаем обработчик, т.к. еще может прийти syncRequestSent
+                        // Просто пропускаем это сообщение
                     }
                 };
                 
@@ -296,7 +311,7 @@ export class RelayClient {
                 
                 // Устанавливаем новый обработчик
                 const tempHandler = (message: SyncMessage) => {
-                    if (message.type === 'syncRequestSent' || message.type === 'error') {
+                    if (message.type === 'syncRequestSent' || message.type === 'error' || message.type === 'trustedDevices') {
                         syncRequestHandler(message);
                     } else {
                         // Вызываем оригинальный обработчик для других сообщений
@@ -322,6 +337,10 @@ export class RelayClient {
                 setTimeout(() => {
                     // Восстанавливаем оригинальный обработчик
                     this.onMessageCallback = this.onMessageCallbackOriginal;
+                    
+                    // Запрашиваем список доверенных устройств на всякий случай
+                    this.requestTrustedDevices();
+                    
                     reject(new Error("Таймаут при использовании ключа приглашения"));
                 }, 30000); // 30 секунд
             });
@@ -452,7 +471,7 @@ export class RelayClient {
     /**
      * Запрос списка доверенных устройств
      */
-    private requestTrustedDevices(): void {
+    public requestTrustedDevices(): void {
         console.log("Запрос списка доверенных устройств");
         
         // Теперь сервер поддерживает эту команду, отправляем запрос
@@ -549,6 +568,11 @@ export class RelayClient {
                             // Уведомляем об изменении
                             this.onTrustedDevicesChangeCallback(this.trustedDevices);
                             console.log("Добавлено новое доверенное устройство:", message.sourceDeviceId);
+                            
+                            // Запрашиваем обновление списка доверенных устройств от сервера
+                            setTimeout(() => {
+                                this.requestTrustedDevices();
+                            }, 1000);
                         }
                     }
                     

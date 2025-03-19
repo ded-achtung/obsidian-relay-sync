@@ -10,6 +10,9 @@ interface RelaySyncSettings {
     ignoredPaths: string[];
     fullSyncInterval: number; // в миллисекундах
     autoConnect: boolean;
+    autoCheckForUpdates: boolean;
+    lastUpdateCheck: number;
+    updateCheckInterval: number; // в днях
 }
 
 const DEFAULT_SETTINGS: RelaySyncSettings = {
@@ -21,7 +24,10 @@ const DEFAULT_SETTINGS: RelaySyncSettings = {
         '.sync/'
     ],
     fullSyncInterval: 30 * 60 * 1000, // 30 минут
-    autoConnect: true // Изменено на true для автоматического подключения
+    autoConnect: true, // Изменено на true для автоматического подключения
+    autoCheckForUpdates: true, // Автоматически проверять обновления
+    lastUpdateCheck: 0, // Время последней проверки обновлений
+    updateCheckInterval: 1 // Проверять обновления каждый день
 };
 
 export default class RelaySyncPlugin extends Plugin {
@@ -34,10 +40,27 @@ export default class RelaySyncPlugin extends Plugin {
 
         await this.loadSettings();
 
-        // Проверка и коррекция автоподключения (для обратной совместимости)
+        // Проверка и коррекция настроек для обратной совместимости
+        let needsSave = false;
+        
         if (this.settings.autoConnect === undefined) {
             console.log('Автоподключение не настроено, устанавливаем значение по умолчанию: true');
             this.settings.autoConnect = true;
+            needsSave = true;
+        }
+        
+        if (this.settings.autoCheckForUpdates === undefined) {
+            console.log('Автопроверка обновлений не настроена, устанавливаем значение по умолчанию: true');
+            this.settings.autoCheckForUpdates = true;
+            needsSave = true;
+        }
+        
+        if (this.settings.updateCheckInterval === undefined) {
+            this.settings.updateCheckInterval = 1; // Проверять раз в день по умолчанию
+            needsSave = true;
+        }
+        
+        if (needsSave) {
             await this.saveSettings();
         }
 
@@ -49,6 +72,11 @@ export default class RelaySyncPlugin extends Plugin {
 
         // Регистрируем команды
         this.addCommands();
+
+        // Проверяем наличие обновлений при запуске
+        if (this.settings.autoCheckForUpdates) {
+            this.checkForUpdates();
+        }
 
         // Если включено автоподключение, запускаем синхронизацию
         if (this.settings.autoConnect && this.settings.serverUrl && this.settings.encryptionPassword) {
@@ -167,6 +195,63 @@ export default class RelaySyncPlugin extends Plugin {
                 }
             }
         });
+        
+        // Команда для проверки обновлений
+        this.addCommand({
+            id: 'check-for-updates',
+            name: 'Проверить наличие обновлений',
+            callback: async () => {
+                new Notice('Проверка обновлений...');
+                await this.checkForUpdates(true);
+            }
+        });
+        
+        // Команды для запуска тестов (только в режиме разработки)
+        if (process.env.NODE_ENV === 'development' || true) { // Всегда включено для тестирования
+            // Команда для запуска тестов оптимизации
+            this.addCommand({
+                id: 'run-optimizer-tests',
+                name: 'Запустить тесты оптимизации',
+                callback: async () => {
+                    // Динамически загружаем тесты (чтобы не включать их в основную сборку)
+                    const { runOptimizerTests } = await import('./src/tests/test-command');
+                    await runOptimizerTests();
+                }
+            });
+            
+            // Команда для запуска всех тестов плагина
+            this.addCommand({
+                id: 'run-all-tests',
+                name: 'Запустить все тесты плагина',
+                callback: async () => {
+                    // Динамически загружаем тесты
+                    const { runAllTests } = await import('./src/tests/test-command');
+                    await runAllTests();
+                }
+            });
+            
+            // Команда для запуска теста реальной синхронизации
+            this.addCommand({
+                id: 'run-real-sync-test',
+                name: 'Запустить тест реальной синхронизации',
+                callback: async () => {
+                    // Динамически загружаем тесты
+                    const { runRealSyncTests } = await import('./src/tests/test-command');
+                    await runRealSyncTests();
+                }
+            });
+            
+            // Команда для запуска теста с моками
+            this.addCommand({
+                id: 'run-mock-sync-test',
+                name: 'Запустить тест синхронизации с моками',
+                callback: async () => {
+                    // Динамически загружаем тесты
+                    const { runMockSyncTests } = await import('./src/tests/test-command');
+                    await runMockSyncTests();
+                }
+            });
+        }
     }
 
     /**
@@ -331,6 +416,54 @@ export default class RelaySyncPlugin extends Plugin {
         if (this.syncManager) {
             this.syncManager.stop();
             this.syncManager = null;
+        }
+    }
+
+    /**
+     * Проверка наличия обновлений
+     */
+    async checkForUpdates(manual = false): Promise<void> {
+        try {
+            // Импортируем здесь, чтобы избежать циклических зависимостей
+            const { checkForUpdates } = await import('./src/utils/github-updater');
+            
+            // Проверяем нужно ли выполнять проверку обновлений
+            const now = Date.now();
+            const checkIntervalMs = this.settings.updateCheckInterval * 24 * 60 * 60 * 1000; // Дни в миллисекунды
+            
+            if (!manual && this.settings.lastUpdateCheck && now - this.settings.lastUpdateCheck < checkIntervalMs) {
+                console.log('Пропуск проверки обновлений, последняя проверка была недавно');
+                return;
+            }
+            
+            // Обновляем время последней проверки
+            this.settings.lastUpdateCheck = now;
+            await this.saveSettings();
+            
+            console.log('Проверка обновлений...');
+            const updateInfo = await checkForUpdates();
+            
+            if (updateInfo.available) {
+                // Показываем уведомление о доступном обновлении
+                const updateMessage = `Доступно обновление: ${updateInfo.latestVersion} (текущая: ${updateInfo.currentVersion})`;
+                new Notice(updateMessage, 10000);
+                
+                // Открываем модальное окно с подробной информацией об обновлении, если это была ручная проверка
+                if (manual) {
+                    // Импортируем и открываем модальное окно с информацией об обновлении
+                    import('./src/ui/update-modal').then(({ UpdateModal }) => {
+                        new UpdateModal(this.app, updateInfo).open();
+                    });
+                }
+            } else if (manual) {
+                // Если это была ручная проверка, показываем уведомление о том, что обновлений нет
+                new Notice('У вас установлена последняя версия плагина');
+            }
+        } catch (error) {
+            console.error('Error checking for updates:', error);
+            if (manual) {
+                new Notice('Ошибка при проверке обновлений: ' + error.message);
+            }
         }
     }
 

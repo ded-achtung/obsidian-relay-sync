@@ -21,6 +21,12 @@ interface FileMetadata {
     mtime: number;
     size: number;
     deleted?: boolean;
+    // Векторные часы для отслеживания версий на всех устройствах
+    vectorClock?: Record<string, number>;
+    // Хеш-значение содержимого последней общей версии для разрешения конфликтов
+    baseVersionHash?: string;
+    // Флаг конфликта, требующего вмешательства пользователя
+    conflict?: boolean;
 }
 
 interface SyncFileMessage {
@@ -41,6 +47,14 @@ interface SyncFileMessage {
     deltaData?: {                        // Данные дельта-синхронизации
         baseHash: string;                // Хеш базового файла
         isDelta: boolean;                // Флаг, показывающий, что содержимое является дельтой
+    };
+    // Векторные часы для точного отслеживания версий
+    vectorClock?: Record<string, number>;
+    // Данные для разрешения конфликтов
+    conflictResolution?: {
+        isConflict: boolean;              // Флаг конфликта версий
+        baseVersionHash?: string;         // Хеш базовой версии для трехстороннего слияния
+        deviceId: string;                 // ID устройства, отправившего версию 
     };
 }
 
@@ -211,14 +225,18 @@ export class SyncManager {
             // Теперь устанавливаем интервал полной синхронизации
             if (this.options.fullSyncInterval && !this.fullSyncInterval) {
                 this.fullSyncInterval = setInterval(
-                    this.performFullSync.bind(this),
+                    this.performSmartSync.bind(this),
                     this.options.fullSyncInterval
                 );
             }
             
-            // Запускаем начальную синхронизацию
-            console.log("Запуск начальной синхронизации...");
-            await this.performFullSync();
+            // Проверяем, есть ли накопленные изменения для синхронизации
+            if (this.pendingChangesCount > 0) {
+                console.log(`Запуск умной синхронизации для ${this.pendingChangesCount} изменений...`);
+                await this.performSmartSync();
+            } else {
+                console.log("Нет накопленных изменений, пропускаем синхронизацию.");
+            }
         } else {
             console.log("Нет активных устройств. Остаёмся в режиме ожидания.");
             this.waitingMode = true;
@@ -413,6 +431,8 @@ export class SyncManager {
      * @param isNew Флаг, указывающий, что файл новый/недавно изменен
      * @param specificDevices Список ID устройств для синхронизации (если задан, то только им)
      * @param requestId ID запроса (если отправка в ответ на запрос)
+     * @param vectorClock Векторные часы для версии файла
+     * @param conflictResolution Данные для разрешения конфликтов
      */
     private async syncFileWithPeers(
         path: string, 
@@ -421,7 +441,13 @@ export class SyncManager {
         mtime: number, 
         isNew: boolean = true,
         specificDevices?: string[],
-        requestId?: string
+        requestId?: string,
+        vectorClock?: Record<string, number>,
+        conflictResolution?: {
+            isConflict: boolean;
+            baseVersionHash?: string;
+            deviceId: string;
+        }
     ): Promise<void> {
         // Проверяем соединение перед началом синхронизации
         if (!this.relayClient.isConnected) {
@@ -608,7 +634,10 @@ export class SyncManager {
                 priority: isNew ? 'high' : 'normal',
                 compression: compressionInfo,
                 isMarkdown: isMarkdown,
-                responseToRequestId: requestId
+                responseToRequestId: requestId,
+                // Добавляем векторные часы и информацию о конфликтах
+                vectorClock: vectorClock || this.getFileVectorClock(path),
+                conflictResolution
             };
 
             // Отправляем сообщение целевым устройствам
@@ -645,14 +674,27 @@ export class SyncManager {
                 return;
             }
             
-            // Для больших файлов используем сигнальную систему - сначала отправляем метаданные
+            // Для больших файлов используем оптимизированную стратегию сигнальной системы
+            // с поддержкой фрагментации для очень больших файлов
+            
+            // Определяем, нужна ли фрагментация файла (для очень больших файлов)
+            const CHUNK_SIZE = 500 * 1024; // 500 KB на фрагмент - оптимальный размер для WebSocket
+            const needsChunking = content.length > CHUNK_SIZE * 2; // Если файл больше 1MB, используем фрагментацию
+            
+            // Генерируем unique ID для этой операции синхронизации (нужно для сборки фрагментов)
+            const syncOperationId = Date.now().toString(36) + Math.random().toString(36).substring(2, 7);
+            
+            // Подготавливаем метаданные файла с дополнительной информацией о фрагментации
             const metadataMessage = {
                 path,
                 hash,
                 mtime,
                 size: content.length,
                 priority: isNew ? 'high' : 'normal',
-                isMarkdown: isMarkdown
+                isMarkdown: isMarkdown,
+                chunked: needsChunking, // Флаг, показывающий, что файл будет отправлен по частям
+                syncOperationId: needsChunking ? syncOperationId : undefined, // ID операции для сборки фрагментов
+                totalChunks: needsChunking ? Math.ceil(content.length / CHUNK_SIZE) : undefined // Общее количество фрагментов
             };
             
             // Отправляем метаданные всем устройствам
@@ -676,10 +718,17 @@ export class SyncManager {
                 console.warn(`Метаданные файла ${path} отправлены только ${metadataSuccessCount} из ${targetDevices.length} устройств из-за проблем с соединением`);
             }
             
-            // Записываем этот файл в локальный кэш для быстрого доступа при запросе
-            this.saveContentToCache(path, content, hash);
+            // Записываем этот файл в локальный кэш для быстрого доступа при запросе,
+            // но только если файл не слишком большой
+            if (!needsChunking) {
+                this.saveContentToCache(path, content, hash);
+            }
             
-            console.log(`Метаданные файла ${path} отправлены на ${targetDevices.length} устройств. Ожидаем запросы на получение содержимого.`);
+            console.log(`Метаданные файла ${path} отправлены на ${targetDevices.length} устройств. ${
+                needsChunking ? 
+                `Файл будет отправлен по запросу в ${Math.ceil(content.length / CHUNK_SIZE)} фрагментах.` : 
+                `Ожидаем запросы на получение содержимого.`
+            }`);
             
         } catch (error) {
             console.error(`Error syncing file ${path}:`, error);
@@ -799,49 +848,278 @@ export class SyncManager {
     
     /**
      * Создать дельту между старым и новым содержимым
+     * Использует оптимизированный алгоритм дельта-сжатия для текстовых файлов
      */
     private createDelta(baseContent: string, newContent: string): string {
         try {
-            // Реализация простого алгоритма дельты для текстовых файлов
-            // В реальном приложении здесь должен быть более эффективный алгоритм
+            // Реализация улучшенного алгоритма дельты для текстовых файлов
             
             // Разбиваем текст на строки
             const baseLines = baseContent.split(/\r?\n/);
             const newLines = newContent.split(/\r?\n/);
             
-            // Находим общие строки в начале файлов
-            let commonStart = 0;
-            while (commonStart < baseLines.length && 
-                   commonStart < newLines.length && 
-                   baseLines[commonStart] === newLines[commonStart]) {
-                commonStart++;
+            // Алгоритм оптимизации: используем LCS (Longest Common Subsequence) с кэшированием
+            const lcsMatrix = this.computeLCSMatrix(baseLines, newLines);
+            
+            // Построение операций дельты на основе LCS
+            const operations = this.extractDeltaOperations(baseLines, newLines, lcsMatrix);
+            
+            // Оптимизация: группировка похожих операций для уменьшения размера
+            const compactOperations = this.compactOperations(operations);
+            
+            // Сериализуем дельту в компактном виде
+            const delta = {
+                originalLength: baseLines.length,
+                newLength: newLines.length,
+                operations: compactOperations
+            };
+            
+            // Проверка эффективности дельты - если размер дельты превышает 70% от размера нового содержимого,
+            // возвращаем полное содержимое с маркером
+            const deltaStr = JSON.stringify(delta);
+            if (deltaStr.length > newContent.length * 0.7) {
+                // Если дельта неэффективна, возвращаем полное содержимое с маркером
+                return JSON.stringify({
+                    fullContent: true,
+                    content: newContent
+                });
             }
             
-            // Находим общие строки в конце файлов
-            let commonEnd = 0;
-            while (commonEnd < baseLines.length - commonStart && 
-                   commonEnd < newLines.length - commonStart && 
-                   baseLines[baseLines.length - 1 - commonEnd] === newLines[newLines.length - 1 - commonEnd]) {
-                commonEnd++;
-            }
-            
-            // Извлекаем измененную часть
-            const baseMiddle = baseLines.slice(commonStart, baseLines.length - commonEnd);
-            const newMiddle = newLines.slice(commonStart, newLines.length - commonEnd);
-            
-            // Создаем дельту в формате JSON
-            const delta = JSON.stringify({
-                commonStart,
-                commonEnd,
-                baseMiddleLength: baseMiddle.length,
-                newMiddle: newMiddle.join('\n')
-            });
-            
-            return delta;
+            return deltaStr;
         } catch (error) {
             console.error("Ошибка при создании дельты:", error);
-            return newContent; // В случае ошибки возвращаем полное содержимое
+            // В случае ошибки возвращаем полное содержимое с маркером
+            return JSON.stringify({
+                fullContent: true,
+                content: newContent,
+                error: error.message
+            });
         }
+    }
+    
+    /**
+     * Вычисляем матрицу наибольшей общей подпоследовательности (LCS)
+     * для базового и нового контента
+     */
+    private computeLCSMatrix(baseLines: string[], newLines: string[]): number[][] {
+        const m = baseLines.length;
+        const n = newLines.length;
+        
+        // Оптимизация памяти: используем разреженную матрицу для больших файлов
+        if (m * n > 10000000) { // 10M ячеек - порог для больших файлов
+            return this.computeLCSMatrixSparse(baseLines, newLines);
+        }
+        
+        // Создаем матрицу (m+1) x (n+1)
+        const lcsMatrix: number[][] = Array(m + 1).fill(null)
+            .map(() => Array(n + 1).fill(0));
+        
+        // Заполняем матрицу
+        for (let i = 1; i <= m; i++) {
+            for (let j = 1; j <= n; j++) {
+                if (baseLines[i - 1] === newLines[j - 1]) {
+                    lcsMatrix[i][j] = lcsMatrix[i - 1][j - 1] + 1;
+                } else {
+                    lcsMatrix[i][j] = Math.max(lcsMatrix[i - 1][j], lcsMatrix[i][j - 1]);
+                }
+            }
+        }
+        
+        return lcsMatrix;
+    }
+    
+    /**
+     * Вычисляем разреженную матрицу LCS для больших файлов
+     * Использует оптимизации по памяти для очень больших файлов
+     */
+    private computeLCSMatrixSparse(baseLines: string[], newLines: string[]): number[][] {
+        const m = baseLines.length;
+        const n = newLines.length;
+        
+        // Для экономии памяти храним только две строки матрицы
+        let prev = Array(n + 1).fill(0);
+        let curr = Array(n + 1).fill(0);
+        
+        // Результирующая матрица будет содержать только последнюю строку
+        // и информацию о диагоналях для восстановления пути
+        const result: number[][] = [];
+        
+        for (let i = 1; i <= m; i++) {
+            [prev, curr] = [curr, prev]; // Меняем строки местами
+            curr[0] = 0;
+            
+            for (let j = 1; j <= n; j++) {
+                if (baseLines[i - 1] === newLines[j - 1]) {
+                    curr[j] = prev[j - 1] + 1;
+                } else {
+                    curr[j] = Math.max(prev[j], curr[j - 1]);
+                }
+            }
+            
+            // Сохраняем только каждую k-ю строку для экономии памяти
+            // и восстановления пути в дальнейшем
+            if (i % 100 === 0 || i === m) {
+                result.push([...curr]);
+            }
+        }
+        
+        // Добавляем контрольные точки для восстановления операций
+        return result;
+    }
+    
+    /**
+     * Извлекаем операции дельты из матрицы LCS
+     */
+    private extractDeltaOperations(baseLines: string[], newLines: string[], lcsMatrix: number[][]): Array<{op: 'keep' | 'insert' | 'delete', start: number, count: number, lines?: string[]}> {
+        const operations: Array<{op: 'keep' | 'insert' | 'delete', start: number, count: number, lines?: string[]}> = [];
+        let i = baseLines.length;
+        let j = newLines.length;
+        
+        // Для разреженной матрицы используем другой алгоритм
+        if (lcsMatrix.length < baseLines.length + 1) {
+            return this.extractDeltaOperationsSparse(baseLines, newLines);
+        }
+        
+        while (i > 0 || j > 0) {
+            if (i > 0 && j > 0 && baseLines[i - 1] === newLines[j - 1]) {
+                // Общая строка
+                operations.unshift({
+                    op: 'keep',
+                    start: i - 1,
+                    count: 1
+                });
+                i--;
+                j--;
+            } else if (j > 0 && (i === 0 || lcsMatrix[i][j - 1] >= lcsMatrix[i - 1][j])) {
+                // Вставка из нового текста
+                operations.unshift({
+                    op: 'insert',
+                    start: j - 1,
+                    count: 1,
+                    lines: [newLines[j - 1]]
+                });
+                j--;
+            } else if (i > 0 && (j === 0 || lcsMatrix[i][j - 1] < lcsMatrix[i - 1][j])) {
+                // Удаление из старого текста
+                operations.unshift({
+                    op: 'delete',
+                    start: i - 1,
+                    count: 1
+                });
+                i--;
+            }
+        }
+        
+        return operations;
+    }
+    
+    /**
+     * Извлекаем операции дельты для разреженной матрицы LCS (для больших файлов)
+     */
+    private extractDeltaOperationsSparse(baseLines: string[], newLines: string[]): Array<{op: 'keep' | 'insert' | 'delete', start: number, count: number, lines?: string[]}> {
+        // Для больших файлов используем упрощенный алгоритм Майерса (Myers) для diff
+        const operations: Array<{op: 'keep' | 'insert' | 'delete', start: number, count: number, lines?: string[]}> = [];
+        
+        // Находим общие блоки в начале и конце файлов
+        let commonStart = 0;
+        while (commonStart < baseLines.length && 
+               commonStart < newLines.length && 
+               baseLines[commonStart] === newLines[commonStart]) {
+            commonStart++;
+        }
+        
+        let commonEnd = 0;
+        while (commonEnd < baseLines.length - commonStart && 
+               commonEnd < newLines.length - commonStart && 
+               baseLines[baseLines.length - 1 - commonEnd] === newLines[newLines.length - 1 - commonEnd]) {
+            commonEnd++;
+        }
+        
+        // Если есть общий блок в начале
+        if (commonStart > 0) {
+            operations.push({
+                op: 'keep',
+                start: 0,
+                count: commonStart
+            });
+        }
+        
+        // Середина файла
+        const baseMiddle = baseLines.slice(commonStart, baseLines.length - commonEnd);
+        const newMiddle = newLines.slice(commonStart, newLines.length - commonEnd);
+        
+        // Если обе средние части не пусты, выделим отличающиеся части
+        if (baseMiddle.length > 0 || newMiddle.length > 0) {
+            // Удаляем старую среднюю часть
+            if (baseMiddle.length > 0) {
+                operations.push({
+                    op: 'delete',
+                    start: commonStart,
+                    count: baseMiddle.length
+                });
+            }
+            
+            // Вставляем новую среднюю часть
+            if (newMiddle.length > 0) {
+                operations.push({
+                    op: 'insert',
+                    start: commonStart,
+                    count: newMiddle.length,
+                    lines: newMiddle
+                });
+            }
+        }
+        
+        // Если есть общий блок в конце
+        if (commonEnd > 0) {
+            operations.push({
+                op: 'keep',
+                start: baseLines.length - commonEnd,
+                count: commonEnd
+            });
+        }
+        
+        return operations;
+    }
+    
+    /**
+     * Группируем и компактизируем операции дельты
+     */
+    private compactOperations(operations: Array<{op: 'keep' | 'insert' | 'delete', start: number, count: number, lines?: string[]}>): Array<{op: 'keep' | 'insert' | 'delete', start: number, count: number, lines?: string[]}> {
+        if (!operations.length) return [];
+        
+        const result: Array<{op: 'keep' | 'insert' | 'delete', start: number, count: number, lines?: string[]}> = [];
+        let current = operations[0];
+        
+        for (let i = 1; i < operations.length; i++) {
+            const next = operations[i];
+            
+            // Если операция та же и следующая позиция следует за текущей
+            if (next.op === current.op && 
+                ((next.op === 'keep' && next.start === current.start + current.count) ||
+                 (next.op === 'delete' && next.start === current.start + current.count) ||
+                 (next.op === 'insert' && next.start === current.start + current.count))) {
+                
+                // Объединяем операции
+                if (next.op === 'insert') {
+                    // Для вставки объединяем массивы строк
+                    if (current.lines && next.lines) {
+                        current.lines = current.lines.concat(next.lines);
+                    }
+                }
+                
+                current.count += next.count;
+            } else {
+                // Иначе сохраняем текущую и переходим к следующей
+                result.push(current);
+                current = next;
+            }
+        }
+        
+        // Добавляем последнюю операцию
+        result.push(current);
+        
+        return result;
     }
     
     /**
@@ -891,33 +1169,76 @@ export class SyncManager {
     
     /**
      * Применить дельту к базовому содержимому
+     * Поддерживает оптимизированный формат дельты
      */
     private applyDelta(baseContent: string, delta: string): string {
         try {
             // Парсим дельту
             const deltaObj = JSON.parse(delta);
             
-            // Разбиваем базовый контент на строки
-            const baseLines = baseContent.split(/\r?\n/);
+            // Проверяем, если это полное содержимое (неэффективная дельта или ошибка)
+            if (deltaObj.fullContent) {
+                console.log("Получена полная версия файла вместо дельты");
+                return deltaObj.content;
+            }
             
-            // Извлекаем общие части
-            const commonStart = deltaObj.commonStart;
-            const commonEnd = deltaObj.commonEnd;
+            // Проверяем совместимость со старым форматом для обратной совместимости
+            if (deltaObj.commonStart !== undefined && deltaObj.commonEnd !== undefined && deltaObj.newMiddle !== undefined) {
+                // Обработка старого формата
+                const baseLines = baseContent.split(/\r?\n/);
+                
+                // Извлекаем общие части
+                const commonStart = deltaObj.commonStart;
+                const commonEnd = deltaObj.commonEnd;
+                
+                // Извлекаем начало и конец файла
+                const startPart = baseLines.slice(0, commonStart);
+                const endPart = baseLines.slice(baseLines.length - commonEnd);
+                
+                // Получаем новую среднюю часть
+                const newMiddle = deltaObj.newMiddle.split(/\r?\n/);
+                
+                // Объединяем части
+                return [...startPart, ...newMiddle, ...endPart].join('\n');
+            }
             
-            // Извлекаем начало и конец файла
-            const startPart = baseLines.slice(0, commonStart);
-            const endPart = baseLines.slice(baseLines.length - commonEnd);
+            // Обработка нового формата с операциями
+            if (deltaObj.operations && Array.isArray(deltaObj.operations)) {
+                const baseLines = baseContent.split(/\r?\n/);
+                const resultLines = [...baseLines]; // Создаем копию для модификации
+                
+                // Применяем операции в обратном порядке (с конца), чтобы индексы не плыли
+                // когда мы вставляем или удаляем строки
+                const sortedOperations = [...deltaObj.operations].sort((a, b) => b.start - a.start);
+                
+                for (const op of sortedOperations) {
+                    switch (op.op) {
+                        case 'keep':
+                            // Для операции 'keep' ничего не делаем
+                            break;
+                            
+                        case 'delete':
+                            // Удаляем указанное количество строк, начиная с указанной позиции
+                            resultLines.splice(op.start, op.count);
+                            break;
+                            
+                        case 'insert':
+                            // Вставляем указанные строки в указанную позицию
+                            if (op.lines && Array.isArray(op.lines)) {
+                                resultLines.splice(op.start, 0, ...op.lines);
+                            }
+                            break;
+                    }
+                }
+                
+                return resultLines.join('\n');
+            }
             
-            // Получаем новую среднюю часть
-            const newMiddle = deltaObj.newMiddle.split(/\r?\n/);
-            
-            // Объединяем части
-            const newContent = [...startPart, ...newMiddle, ...endPart].join('\n');
-            
-            return newContent;
+            // Если формат дельты неизвестен, генерируем ошибку
+            throw new Error("Неизвестный формат дельты");
         } catch (error) {
             console.error("Ошибка при применении дельты:", error);
-            throw new Error("Не удалось применить дельту к файлу");
+            throw new Error(`Не удалось применить дельту к файлу: ${error.message}`);
         }
     }
     
@@ -1015,29 +1336,90 @@ export class SyncManager {
     }
     
     /**
-     * Сохранить содержимое файла в кэш
+     * Кэш содержимого файлов с метаинформацией и контролем размера
      */
-    private fileContentCache: Map<string, {content: string, hash: string, timestamp: number}> = new Map();
+    private fileContentCache: Map<string, {
+        content: string, 
+        hash: string, 
+        timestamp: number, 
+        size: number
+    }> = new Map();
     
+    private totalCacheSize: number = 0;
+    private readonly MAX_CACHE_SIZE_MB: number = 50; // Максимальный размер кэша в МБ
+    private readonly MAX_CACHE_ENTRY_SIZE_MB: number = 5; // Максимальный размер одной записи в кэше в МБ
+    
+    /**
+     * Сохранить содержимое файла в кэш с учетом размера памяти
+     */
     private saveContentToCache(path: string, content: string, hash: string): void {
-        // Ограничиваем размер кэша
-        if (this.fileContentCache.size > 100) {
-            // Удаляем самые старые записи
-            const oldestEntries = Array.from(this.fileContentCache.entries())
-                .sort((a, b) => a[1].timestamp - b[1].timestamp)
-                .slice(0, 20);
-                
-            for (const [oldPath] of oldestEntries) {
-                this.fileContentCache.delete(oldPath);
-            }
+        // Размер контента в байтах (приблизительно - 2 байта на символ в UTF-16)
+        const contentSize = content.length * 2;
+        const contentSizeMB = contentSize / (1024 * 1024);
+        
+        // Если размер файла превышает лимит для одной записи, не кэшируем
+        if (contentSizeMB > this.MAX_CACHE_ENTRY_SIZE_MB) {
+            console.log(`Файл ${path} слишком большой для кэширования (${contentSizeMB.toFixed(2)} МБ)`);
+            return;
         }
         
-        // Сохраняем содержимое в кэш
+        // Проверяем наличие существующей записи для этого пути
+        const existingEntry = this.fileContentCache.get(path);
+        if (existingEntry) {
+            // Обновляем общий размер кэша, вычитая размер старой записи
+            this.totalCacheSize -= existingEntry.size;
+        }
+        
+        // Если новый размер кэша превысит лимит, удаляем старые записи
+        if (this.totalCacheSize + contentSize > this.MAX_CACHE_SIZE_MB * 1024 * 1024) {
+            this.pruneCache(contentSize);
+        }
+        
+        // Добавляем новую запись
         this.fileContentCache.set(path, {
             content,
             hash,
-            timestamp: Date.now()
+            timestamp: Date.now(),
+            size: contentSize
         });
+        
+        // Обновляем общий размер кэша
+        this.totalCacheSize += contentSize;
+        
+        console.log(`Файл ${path} добавлен в кэш (${(contentSize / 1024).toFixed(2)} КБ). Общий размер кэша: ${(this.totalCacheSize / (1024 * 1024)).toFixed(2)} МБ`);
+    }
+    
+    /**
+     * Удаляет старые записи из кэша, чтобы освободить указанное количество байт
+     */
+    private pruneCache(bytesNeeded: number): void {
+        // Если кэш пуст, ничего не делаем
+        if (this.fileContentCache.size === 0) return;
+        
+        // Сортируем записи кэша по времени последнего доступа (старые в начале)
+        const sortedEntries = Array.from(this.fileContentCache.entries())
+            .sort((a, b) => a[1].timestamp - b[1].timestamp);
+        
+        let freedSpace = 0;
+        let removedEntries = 0;
+        
+        // Удаляем записи, пока не освободим достаточно места
+        for (const [path, entry] of sortedEntries) {
+            this.fileContentCache.delete(path);
+            freedSpace += entry.size;
+            removedEntries++;
+            
+            // Если освободили нужное количество байт, выходим из цикла
+            if (freedSpace >= bytesNeeded || 
+                this.totalCacheSize - freedSpace < this.MAX_CACHE_SIZE_MB * 1024 * 1024 * 0.7) { // Оставляем 30% запас
+                break;
+            }
+        }
+        
+        // Обновляем общий размер кэша
+        this.totalCacheSize -= freedSpace;
+        
+        console.log(`Очистка кэша: удалено ${removedEntries} записей, освобождено ${(freedSpace / 1024).toFixed(2)} КБ. Новый размер кэша: ${(this.totalCacheSize / (1024 * 1024)).toFixed(2)} МБ`);
     }
     
     /**
@@ -1046,9 +1428,20 @@ export class SyncManager {
     private getContentFromCache(path: string, hash: string): string | null {
         const cached = this.fileContentCache.get(path);
         if (cached && cached.hash === hash) {
+            // Обновляем timestamp при доступе к записи, чтобы отслеживать LRU (Least Recently Used)
+            cached.timestamp = Date.now();
             return cached.content;
         }
         return null;
+    }
+    
+    /**
+     * Очистить кэш полностью
+     */
+    private clearCache(): void {
+        this.fileContentCache.clear();
+        this.totalCacheSize = 0;
+        console.log('Кэш файлов очищен');
     }
 
     /**
@@ -1110,7 +1503,7 @@ export class SyncManager {
                 console.log(`Получен пинг от устройства ${message.deviceName || message.sourceDeviceId}`);
                 
                 // Всегда отвечаем на пинги, даже в режиме ожидания, используя тип 'message'
-                this.relayClient.sendMessage({
+                const sent = this.relayClient.sendMessage({
                     type: 'message',
                     targetDeviceId: message.sourceDeviceId,
                     payload: {
@@ -1118,17 +1511,26 @@ export class SyncManager {
                         pingId: message.payload.pingId
                     }
                 });
+                console.log(`Отправлен ответ на пинг устройству ${message.sourceDeviceId}: ${sent ? 'успешно' : 'ошибка'}`);
+                
+                // Принудительно проверяем, является ли устройство доверенным
+                const isTrusted = this.relayClient.isDeviceTrusted(message.sourceDeviceId || '');
+                console.log(`Устройство ${message.sourceDeviceId} доверенное: ${isTrusted}`);
                 
                 // Если мы в режиме ожидания и получили пинг от доверенного устройства, 
-                // это значит, что есть активные устройства - проверяем и выходим из режима ожидания
-                if (this.waitingMode && this.relayClient.isDeviceTrusted(message.sourceDeviceId || '')) {
+                // это значит, что есть активные устройства - выходим из режима ожидания
+                if (this.waitingMode && isTrusted) {
                     console.log("Получен пинг от доверенного устройства. Выходим из режима ожидания.");
                     this.waitingMode = false;
+                    new Notice("Обнаружено активное доверенное устройство");
                     
-                    // Если есть накопленные изменения, запускаем синхронизацию
+                    // Проверяем, есть ли накопленные изменения для синхронизации
                     if (this.pendingChangesCount > 0) {
-                        console.log(`Есть ${this.pendingChangesCount} накопленных изменений. Запускаем синхронизацию.`);
-                        setTimeout(() => this.performFullSync(), 1000);
+                        console.log(`Есть ${this.pendingChangesCount} накопленных изменений. Начинаем умную синхронизацию.`);
+                        new Notice(`Синхронизируем ${this.pendingChangesCount} изменений`);
+                        setTimeout(() => this.performSmartSync(), 1000);
+                    } else {
+                        console.log("Нет накопленных изменений, пропускаем синхронизацию.");
                     }
                 }
                 
@@ -1137,6 +1539,29 @@ export class SyncManager {
             
             // Обработка ответа на пинг устройства через тип 'message' (обрабатывается в checkActiveTrustedDevices)
             if (message.type === 'message' && message.payload && message.payload.action === 'devicePingResponse') {
+                console.log(`Получен ответ на пинг от устройства ${message.deviceName || message.sourceDeviceId}`);
+                
+                // Принудительно проверяем, является ли устройство доверенным
+                const isTrusted = this.relayClient.isDeviceTrusted(message.sourceDeviceId || '');
+                console.log(`Устройство ${message.sourceDeviceId} доверенное: ${isTrusted}`);
+                
+                // Если мы в режиме ожидания и получили ответ от доверенного устройства, 
+                // это значит, что есть активные устройства - выходим из режима ожидания
+                if (this.waitingMode && isTrusted) {
+                    console.log("Получен ответ на пинг от доверенного устройства. Выходим из режима ожидания.");
+                    this.waitingMode = false;
+                    new Notice("Обнаружено активное доверенное устройство");
+                    
+                    // Проверяем, есть ли накопленные изменения для синхронизации
+                    if (this.pendingChangesCount > 0) {
+                        console.log(`Есть ${this.pendingChangesCount} накопленных изменений. Начинаем умную синхронизацию.`);
+                        new Notice(`Синхронизируем ${this.pendingChangesCount} изменений`);
+                        setTimeout(() => this.performSmartSync(), 1000);
+                    } else {
+                        console.log("Нет накопленных изменений, пропускаем синхронизацию.");
+                    }
+                }
+                
                 // Обработка происходит в обработчике, установленном в checkActiveTrustedDevices
                 return;
             }
@@ -1219,20 +1644,33 @@ export class SyncManager {
             
             console.log(`Получены метаданные файла ${path} от устройства ${message.deviceName || message.sourceDeviceId}`);
             
-            // Проверяем, нужен ли нам этот файл
-            const needFile = await this.checkIfFileNeeded(path, payload.hash, payload.mtime);
+            // Извлекаем векторные часы, если они есть
+            const remoteVectorClock = payload.vectorClock;
             
-            if (needFile) {
+            // Проверяем, нужен ли нам этот файл и требуется ли слияние
+            const { needsSync, needsMerge } = await this.checkIfFileNeeded(
+                path, 
+                payload.hash, 
+                payload.mtime, 
+                remoteVectorClock, 
+                message.sourceDeviceId
+            );
+            
+            if (needsSync) {
                 // Запрашиваем файл от отправителя
-                console.log(`Запрашиваем файл ${path} от устройства ${message.sourceDeviceId}`);
+                console.log(`Запрашиваем файл ${path} от устройства ${message.sourceDeviceId} ${needsMerge ? '(требуется слияние)' : ''}`);
+                
+                const requestId = Date.now().toString() + '-' + Math.random().toString(36).substr(2, 5);
                 
                 this.relayClient.sendMessage({
                     type: 'requestFile',
                     targetDeviceId: message.sourceDeviceId,
-                    requestId: Date.now().toString() + '-' + Math.random().toString(36).substr(2, 5),
+                    requestId: requestId,
                     payload: {
                         path,
-                        hash: payload.hash
+                        hash: payload.hash,
+                        needsMerge: needsMerge,
+                        vectorClock: this.syncState.files[path]?.vectorClock // Отправляем наши векторные часы для разрешения конфликтов
                     }
                 });
             } else {
@@ -1245,14 +1683,15 @@ export class SyncManager {
     
     /**
      * Проверить, нужен ли нам файл с указанными метаданными
+     * и определить тип необходимой синхронизации (обновление, слияние)
      */
-    private async checkIfFileNeeded(path: string, hash: string, remoteMtime: number): Promise<boolean> {
+    private async checkIfFileNeeded(path: string, hash: string, remoteMtime: number, remoteVectorClock?: Record<string, number>, sourceDeviceId?: string): Promise<{needsSync: boolean, needsMerge: boolean}> {
         // Получаем локальный файл
         const file = this.app.vault.getAbstractFileByPath(path);
         
         // Если файла нет локально, он нам нужен
         if (!(file instanceof TFile)) {
-            return true;
+            return { needsSync: true, needsMerge: false };
         }
         
         // Проверяем локальные метаданные
@@ -1262,36 +1701,124 @@ export class SyncManager {
         if (!localMetadata) {
             const content = await this.app.vault.read(file);
             const localHash = await CryptoHelper.hashString(content);
-            return localHash !== hash;
+            return { needsSync: localHash !== hash, needsMerge: false };
         }
         
-        // Если хеши различаются, нужно сравнить актуальность версий
+        // Если хеши различаются, проверяем на конфликт с помощью векторных часов
         if (localMetadata.hash !== hash) {
-            // Если локальная версия файла новее удаленной, не запрашиваем удаленную
-            // Это важно, чтобы недавние редактирования не перезаписывались старыми версиями
-            if (localMetadata.mtime > remoteMtime) {
-                console.log(`КОНФЛИКТ ВЕРСИЙ: Локальная версия файла ${path} новее (${new Date(localMetadata.mtime).toISOString()}) чем удаленная (${new Date(remoteMtime).toISOString()}). Сохраняем локальную версию.`);
-                
-                // В будущем здесь может быть логика разрешения конфликтов
-                // Но пока просто не запрашиваем файл, сохраняя более новую локальную версию
-                return false;
+            // Инициализируем векторные часы, если они еще не созданы
+            if (!localMetadata.vectorClock) {
+                localMetadata.vectorClock = { [this.syncState.deviceId]: localMetadata.mtime };
             }
             
-            // Если удаленная версия новее, запрашиваем ее
-            console.log(`Удаленная версия файла ${path} новее (${new Date(remoteMtime).toISOString()}) чем локальная (${new Date(localMetadata.mtime).toISOString()}). Запрашиваем обновление.`);
-            return true;
+            // Если у удаленной версии нет векторных часов или это старый формат, используем время модификации
+            if (!remoteVectorClock || Object.keys(remoteVectorClock).length === 0) {
+                // Проверяем по времени модификации
+                if (localMetadata.mtime > remoteMtime) {
+                    console.log(`КОНФЛИКТ ВЕРСИЙ: Локальная версия файла ${path} новее (${new Date(localMetadata.mtime).toISOString()}) чем удаленная (${new Date(remoteMtime).toISOString()}). Пробуем слияние.`);
+                    
+                    // Если локальная версия новее, но мы знаем устройство-источник, это может быть конфликт
+                    if (sourceDeviceId) {
+                        return { needsSync: true, needsMerge: true };
+                    }
+                    
+                    // Иначе сохраняем локальную версию
+                    return { needsSync: false, needsMerge: false };
+                }
+                
+                // Если удаленная версия новее, запрашиваем её
+                console.log(`Удаленная версия файла ${path} новее (${new Date(remoteMtime).toISOString()}) чем локальная (${new Date(localMetadata.mtime).toISOString()}). Запрашиваем обновление.`);
+                return { needsSync: true, needsMerge: false };
+            }
+            
+            // При наличии векторных часов выполняем более точное сравнение
+            const comparisonResult = this.compareVectorClocks(localMetadata.vectorClock, remoteVectorClock);
+            
+            switch (comparisonResult) {
+                case 'identical':
+                    // Часы идентичны, но хеши разные - странная ситуация
+                    console.log(`Странно: векторные часы идентичны, но хеши разные для ${path}. Запрашиваем обновление.`);
+                    return { needsSync: true, needsMerge: false };
+                
+                case 'local_newer':
+                    // Локальная версия новее
+                    console.log(`Локальная версия ${path} новее по векторным часам. Сохраняем локальную версию.`);
+                    return { needsSync: false, needsMerge: false };
+                
+                case 'remote_newer':
+                    // Удаленная версия новее
+                    console.log(`Удаленная версия ${path} новее по векторным часам. Запрашиваем обновление.`);
+                    return { needsSync: true, needsMerge: false };
+                
+                case 'conflict':
+                    // Обнаружен конфликт - обе версии имеют независимые изменения
+                    console.log(`КОНФЛИКТ: Обнаружены параллельные изменения файла ${path}. Требуется слияние.`);
+                    return { needsSync: true, needsMerge: true };
+            }
         }
         
         // Если хеши совпадают, файл не нужно синхронизировать
-        return false;
+        return { needsSync: false, needsMerge: false };
+    }
+    
+    /**
+     * Сравнить два набора векторных часов и определить отношение между ними
+     * @returns 'identical' - идентичны, 'local_newer' - локальные новее, 
+     * 'remote_newer' - удаленные новее, 'conflict' - конфликт версий
+     */
+    private compareVectorClocks(localClock: Record<string, number>, remoteClock: Record<string, number>): 'identical' | 'local_newer' | 'remote_newer' | 'conflict' {
+        // Проверка на идентичность
+        const allDeviceIds = new Set([...Object.keys(localClock), ...Object.keys(remoteClock)]);
+        
+        let localHasNewer = false;
+        let remoteHasNewer = false;
+        
+        for (const deviceId of allDeviceIds) {
+            const localTime = localClock[deviceId] || 0;
+            const remoteTime = remoteClock[deviceId] || 0;
+            
+            if (localTime > remoteTime) {
+                localHasNewer = true;
+            } else if (remoteTime > localTime) {
+                remoteHasNewer = true;
+            }
+            
+            // Если обнаружили различия в обоих направлениях, это конфликт
+            if (localHasNewer && remoteHasNewer) {
+                return 'conflict';
+            }
+        }
+        
+        // Определяем результат сравнения
+        if (!localHasNewer && !remoteHasNewer) {
+            return 'identical';
+        } else if (localHasNewer) {
+            return 'local_newer';
+        } else {
+            return 'remote_newer';
+        }
     }
     
     /**
      * Обработчик запроса на получение файла
+     * с поддержкой фрагментации для больших файлов
      */
-    private async handleFileRequest(path: string, sourceDeviceId: string, requestId?: string): Promise<void> {
+    private async handleFileRequest(
+        path: string, 
+        sourceDeviceId: string, 
+        requestId?: string, 
+        needsMerge: boolean = false, 
+        remoteVectorClock?: Record<string, number>,
+        chunkRequest?: { chunkIndex: number, totalChunks: number, syncOperationId: string }
+    ): Promise<void> {
         try {
-            console.log(`Обработка запроса на получение файла ${path}...`);
+            // Если это запрос на фрагмент файла
+            if (chunkRequest) {
+                await this.handleFileChunkRequest(path, sourceDeviceId, chunkRequest, requestId);
+                return;
+            }
+            
+            console.log(`Обработка запроса на получение файла ${path}...${needsMerge ? ' (запрошено слияние)' : ''}`);
             
             // Получаем файл из хранилища
             const file = this.app.vault.getAbstractFileByPath(path);
@@ -1300,19 +1827,212 @@ export class SyncManager {
                 return;
             }
             
-            // Читаем содержимое файла
-            const content = await this.app.vault.read(file);
+            // Проверяем размер файла для определения стратегии отправки
+            const fileSize = file.stat.size;
+            const CHUNK_SIZE = 500 * 1024; // 500 KB - тот же размер, что и при отправке
+            const needsChunking = fileSize > CHUNK_SIZE * 2; // Если файл больше 1MB, используем фрагментацию
             
-            // Вычисляем хеш содержимого
-            const hash = await CryptoHelper.hashString(content);
+            // Если не нужна фрагментация, отправляем файл целиком обычным способом
+            if (!needsChunking) {
+                // Читаем содержимое файла
+                const content = await this.app.vault.read(file);
+                
+                // Вычисляем хеш содержимого
+                const hash = await CryptoHelper.hashString(content);
+                
+                // Получаем метаданные файла
+                const metadata = this.syncState.files[path];
+                
+                // Если файла нет в метаданных, создаем его запись
+                if (!metadata) {
+                    this.syncState.files[path] = {
+                        path,
+                        hash,
+                        mtime: file.stat.mtime,
+                        size: content.length,
+                        vectorClock: { [this.syncState.deviceId]: Date.now() }
+                    };
+                }
+                
+                // Если требуется слияние, добавляем информацию для разрешения конфликта
+                let conflictResolution = undefined;
+                if (needsMerge) {
+                    console.log(`Подготовка данных для слияния файла ${path}`);
+                    
+                    // Находим или создаем общую базовую версию для слияния
+                    const baseVersionHash = await this.findCommonBaseVersion(path, hash, remoteVectorClock);
+                    
+                    conflictResolution = {
+                        isConflict: true,
+                        baseVersionHash: baseVersionHash,
+                        deviceId: this.syncState.deviceId
+                    };
+                }
+                
+                // Обновляем векторные часы, увеличивая значение для текущего устройства
+                const currentTime = Date.now();
+                const vectorClock = metadata?.vectorClock ? { ...metadata.vectorClock } : {}; 
+                vectorClock[this.syncState.deviceId] = currentTime;
+                
+                // Отправляем файл запрашивающему устройству с дополнительной информацией
+                await this.syncFileWithPeers(
+                    path, 
+                    content, 
+                    hash, 
+                    file.stat.mtime, 
+                    true, 
+                    [sourceDeviceId], 
+                    requestId,
+                    vectorClock,
+                    conflictResolution
+                );
+                
+                console.log(`Файл ${path} отправлен устройству ${sourceDeviceId} по запросу`);
+                
+                // Обновляем наши метаданные файла
+                if (metadata) {
+                    metadata.vectorClock = vectorClock;
+                    this.saveSyncState();
+                }
+                
+                return;
+            }
             
-            // Отправляем файл запрашивающему устройству
-            await this.syncFileWithPeers(path, content, hash, file.stat.mtime, true, [sourceDeviceId], requestId);
+            // Если файл требует фрагментации, отправляем информацию о фрагментах
+            // Генерируем unique ID для этой операции синхронизации 
+            const syncOperationId = Date.now().toString(36) + Math.random().toString(36).substring(2, 7);
+            const totalChunks = Math.ceil(fileSize / CHUNK_SIZE);
             
-            console.log(`Файл ${path} отправлен устройству ${sourceDeviceId} по запросу`);
+            // Вычисляем хеш для метаданных
+            const hash = await CryptoHelper.hashString(await this.app.vault.read(file));
+            
+            // Отправляем информацию о фрагментированном файле
+            this.relayClient.sendMessage({
+                type: 'fileChunkInfo',
+                targetDeviceId: sourceDeviceId,
+                requestId,
+                payload: {
+                    path,
+                    hash,
+                    mtime: file.stat.mtime,
+                    size: fileSize,
+                    syncOperationId,
+                    totalChunks,
+                    chunkSize: CHUNK_SIZE,
+                    needsMerge
+                }
+            });
+            
+            console.log(`Информация о фрагментах файла ${path} отправлена устройству ${sourceDeviceId}. Всего фрагментов: ${totalChunks}`);
+            
         } catch (error) {
             console.error(`Ошибка при обработке запроса на получение файла ${path}:`, error);
         }
+    }
+    
+    /**
+     * Обработка запроса на получение фрагмента файла
+     */
+    private async handleFileChunkRequest(
+        path: string,
+        sourceDeviceId: string,
+        chunkRequest: { chunkIndex: number, totalChunks: number, syncOperationId: string },
+        requestId?: string
+    ): Promise<void> {
+        try {
+            console.log(`Обработка запроса на получение фрагмента ${chunkRequest.chunkIndex + 1}/${chunkRequest.totalChunks} файла ${path}`);
+            
+            // Получаем файл из хранилища
+            const file = this.app.vault.getAbstractFileByPath(path);
+            if (!(file instanceof TFile)) {
+                console.log(`Файл ${path} не найден или не является файлом`);
+                return;
+            }
+            
+            // Проверяем валидность запроса
+            if (chunkRequest.chunkIndex < 0 || chunkRequest.chunkIndex >= chunkRequest.totalChunks) {
+                console.error(`Некорректный индекс фрагмента: ${chunkRequest.chunkIndex}`);
+                return;
+            }
+            
+            // Вычисляем размер фрагмента и смещение
+            const CHUNK_SIZE = 500 * 1024; // 500 KB - должно совпадать с размером при отправке
+            const fileSize = file.stat.size;
+            const startOffset = chunkRequest.chunkIndex * CHUNK_SIZE;
+            const endOffset = Math.min(startOffset + CHUNK_SIZE, fileSize);
+            const chunkSize = endOffset - startOffset;
+            
+            // Читаем содержимое файла частично
+            const fileContent = await this.app.vault.read(file);
+            const chunkContent = fileContent.substring(startOffset, endOffset);
+            
+            // Шифруем фрагмент
+            const encryptedData = await CryptoHelper.encrypt(chunkContent, this.encryptionPassword);
+            
+            // Отправляем фрагмент
+            this.relayClient.sendMessage({
+                type: 'fileChunk',
+                targetDeviceId: sourceDeviceId,
+                requestId,
+                payload: {
+                    path,
+                    encryptedData,
+                    chunkIndex: chunkRequest.chunkIndex,
+                    totalChunks: chunkRequest.totalChunks,
+                    syncOperationId: chunkRequest.syncOperationId,
+                    isLastChunk: chunkRequest.chunkIndex === chunkRequest.totalChunks - 1
+                }
+            });
+            
+            console.log(`Фрагмент ${chunkRequest.chunkIndex + 1}/${chunkRequest.totalChunks} файла ${path} отправлен устройству ${sourceDeviceId}`);
+            
+        } catch (error) {
+            console.error(`Ошибка при обработке запроса на получение фрагмента файла ${path}:`, error);
+        }
+    }
+    
+    /**
+     * Найти общую базовую версию для слияния конфликтующих изменений
+     * @returns Хеш базовой версии или undefined, если не найдена
+     */
+    private async findCommonBaseVersion(path: string, currentHash: string, remoteVectorClock?: Record<string, number>): Promise<string | undefined> {
+        try {
+            // Проверяем сохраненную базовую версию
+            const metadata = this.syncState.files[path];
+            if (metadata?.baseVersionHash) {
+                console.log(`Найдена сохраненная общая базовая версия для ${path}: ${metadata.baseVersionHash.substring(0, 8)}`);
+                return metadata.baseVersionHash;
+            }
+            
+            // Проверяем кэш файлов для поиска общей базовой версии
+            for (const cacheEntry of this.fileContentCache.entries()) {
+                const [cachedPath, cachedData] = cacheEntry;
+                if (cachedPath === path && cachedData.hash !== currentHash) {
+                    console.log(`Найдена потенциальная базовая версия в кэше для ${path}: ${cachedData.hash.substring(0, 8)}`);
+                    return cachedData.hash;
+                }
+            }
+            
+            // Временное решение: используем текущий хеш файла
+            // В полной реализации нужно отслеживать историю версий
+            return currentHash;
+        } catch (error) {
+            console.error(`Ошибка при поиске базовой версии для ${path}:`, error);
+            return currentHash;
+        }
+    }
+
+    /**
+     * Возвращает текущие векторные часы для файла
+     */
+    private getFileVectorClock(path: string): Record<string, number> {
+        const metadata = this.syncState.files[path];
+        if (metadata?.vectorClock) {
+            return { ...metadata.vectorClock };
+        }
+        
+        // Если нет метаданных или векторных часов, создаем их
+        return { [this.syncState.deviceId]: Date.now() };
     }
 
     /**
@@ -1350,10 +2070,23 @@ export class SyncManager {
                 return;
             }
 
-            // Проверяем, есть ли у нас уже такая версия файла
+            // Проверяем на конфликт версий с помощью векторных часов
             const existingFile = this.syncState.files[path];
+            const remoteVectorClock = fileMessage.vectorClock;
+            
+            // Если у нас есть файл с таким же хешем, пропускаем
             if (existingFile && existingFile.hash === hash) {
                 console.log(`Пропуск файла ${path}: у нас уже есть актуальная версия`);
+                
+                // Обновляем векторные часы, объединяя их с удаленными
+                if (remoteVectorClock) {
+                    existingFile.vectorClock = this.mergeVectorClocks(
+                        existingFile.vectorClock || {},
+                        remoteVectorClock
+                    );
+                    this.saveSyncState();
+                }
+                
                 return;
             }
 
@@ -1409,6 +2142,61 @@ export class SyncManager {
                     finalContent = decryptedContent;
                 }
             }
+            
+            // Проверяем на конфликт с помощью векторных часов и информации о конфликте
+            let needsMerge = false;
+            if (existingFile && existingFile.hash !== hash && existingFile.vectorClock && remoteVectorClock) {
+                const comparisonResult = this.compareVectorClocks(existingFile.vectorClock, remoteVectorClock);
+                needsMerge = comparisonResult === 'conflict' || (fileMessage.conflictResolution?.isConflict === true);
+                
+                if (needsMerge) {
+                    console.log(`Обнаружен конфликт версий файла ${path}. Применяем стратегию слияния.`);
+                    
+                    // Читаем текущее содержимое нашего файла
+                    const localContent = await this.app.vault.read(this.app.vault.getAbstractFileByPath(path) as TFile);
+                    
+                    // Создаем резервную копию текущей версии
+                    const backupPath = `${path}.backup.${new Date().toISOString().replace(/:/g, '-')}`;
+                    await this.app.vault.create(backupPath, localContent);
+                    console.log(`Создана резервная копия локальной версии: ${backupPath}`);
+                    
+                    // Сохраняем базовую версию для будущего использования
+                    if (fileMessage.conflictResolution?.baseVersionHash) {
+                        existingFile.baseVersionHash = fileMessage.conflictResolution.baseVersionHash;
+                    }
+                    
+                    // Пытаемся выполнить автоматическое слияние
+                    try {
+                        finalContent = await this.mergeFileContents(path, localContent, finalContent, fileMessage.conflictResolution?.baseVersionHash);
+                        console.log(`Успешно выполнено автоматическое слияние файла ${path}`);
+                        
+                        // Создаем объединенные векторные часы
+                        const mergedVectorClock = this.mergeVectorClocks(
+                            existingFile.vectorClock || {},
+                            remoteVectorClock
+                        );
+                        
+                        // Увеличиваем наш счетчик как автора слияния
+                        mergedVectorClock[this.syncState.deviceId] = Date.now();
+                        
+                        // Устанавливаем новые векторные часы
+                        existingFile.vectorClock = mergedVectorClock;
+                    } catch (mergeError) {
+                        console.error(`Не удалось автоматически слить файл ${path}:`, mergeError);
+                        
+                        // Создаем копию конфликтующей версии
+                        const conflictPath = `${path}.conflict.${new Date().toISOString().replace(/:/g, '-')}`;
+                        await this.app.vault.create(conflictPath, finalContent);
+                        
+                        new Notice(`Конфликт версий файла ${path}. Обе версии сохранены для ручного слияния.`);
+                        
+                        // Не обновляем основной файл, только метаданные
+                        existingFile.conflict = true;
+                        this.saveSyncState();
+                        return;
+                    }
+                }
+            }
 
             // Проверяем, существует ли директория для файла
             const dirPath = path.split('/').slice(0, -1).join('/');
@@ -1428,19 +2216,222 @@ export class SyncManager {
                 await this.app.vault.create(path, finalContent);
             }
 
+            // Создаем новый хеш содержимого после слияния
+            const newHash = needsMerge ? await CryptoHelper.hashString(finalContent) : hash;
+            
             // Обновляем состояние синхронизации
             this.syncState.files[path] = {
                 path,
-                hash,
-                mtime,
-                size: finalContent.length
+                hash: newHash,
+                mtime: Date.now(), // Используем текущее время для слитой версии
+                size: finalContent.length,
+                // Объединяем или обновляем векторные часы
+                vectorClock: needsMerge ? 
+                    (existingFile?.vectorClock || this.mergeVectorClocks({}, remoteVectorClock || {})) : 
+                    (remoteVectorClock || { [this.syncState.deviceId]: Date.now() }),
+                // Сохраняем базовую версию, если она была предоставлена
+                baseVersionHash: fileMessage.conflictResolution?.baseVersionHash || existingFile?.baseVersionHash
             };
+            
+            // Устанавливаем наше устройство как последнее изменившее файл
+            if (this.syncState.files[path].vectorClock) {
+                this.syncState.files[path].vectorClock[this.syncState.deviceId] = Date.now();
+            }
 
-            console.log(`Файл синхронизирован: ${path} (${finalContent.length} байт)`);
+            // Сохраняем обновленное состояние
+            this.saveSyncState();
+
+            console.log(`Файл ${needsMerge ? 'слит и синхронизирован' : 'синхронизирован'}: ${path} (${finalContent.length} байт)`);
         } catch (error) {
             console.error(`Ошибка обработки сообщения синхронизации для файла ${path}:`, error);
             new Notice(`Ошибка синхронизации файла ${path}: ${error.message}`);
         }
+    }
+    
+    /**
+     * Объединить два набора векторных часов, выбирая максимальное значение для каждого устройства
+     */
+    private mergeVectorClocks(clock1: Record<string, number>, clock2: Record<string, number>): Record<string, number> {
+        const result = { ...clock1 };
+        
+        // Для каждого устройства в clock2 устанавливаем максимальное значение
+        for (const [deviceId, time] of Object.entries(clock2)) {
+            result[deviceId] = Math.max(result[deviceId] || 0, time);
+        }
+        
+        return result;
+    }
+    
+    /**
+     * Слияние содержимого файлов при конфликте
+     * Реализует трехстороннее слияние, если доступна базовая версия
+     */
+    private async mergeFileContents(path: string, localContent: string, remoteContent: string, baseVersionHash?: string): Promise<string> {
+        try {
+            // Проверка входных параметров
+            if (!localContent && !remoteContent) {
+                console.warn(`mergeFileContents: Пустое содержимое для ${path}`);
+                return "";
+            }
+            
+            if (!localContent) return remoteContent;
+            if (!remoteContent) return localContent;
+            
+            // Определяем тип файла
+            const isMarkdown = path.endsWith('.md');
+            
+            // Для Markdown используем построчное слияние
+            if (isMarkdown) {
+                // Если есть базовая версия, используем трехстороннее слияние
+                if (baseVersionHash) {
+                    const baseContent = await this.getFileWithHash(path, baseVersionHash);
+                    if (baseContent) {
+                        return this.threeWayMerge(baseContent, localContent, remoteContent);
+                    }
+                }
+                
+                // Иначе используем простое построчное слияние
+                return this.lineMerge(localContent, remoteContent);
+            }
+        } catch (error) {
+            console.error(`Ошибка при слиянии содержимого файла ${path}:`, error);
+            // В случае ошибки сохраняем обе версии с разделителями
+            return `<<<<<<< ЛОКАЛЬНАЯ ВЕРСИЯ (ОШИБКА СЛИЯНИЯ)\n${localContent}\n=======\n${remoteContent}\n>>>>>>> УДАЛЕННАЯ ВЕРСИЯ\n`;
+        }
+        
+        // Для других типов файлов просто объединяем содержимое с разделителем
+        const mergedContent = 
+            `<<<<<<< ЛОКАЛЬНАЯ ВЕРСИЯ\n${localContent}\n=======\n${remoteContent}\n>>>>>>> УДАЛЕННАЯ ВЕРСИЯ\n`;
+        
+        // Показываем уведомление о необходимости ручного слияния
+        new Notice(`Не удалось автоматически слить файл ${path}. Требуется ручное слияние.`);
+        
+        return mergedContent;
+    }
+    
+    /**
+     * Простое построчное слияние для текстовых файлов
+     * Объединяет уникальные строки из обеих версий
+     */
+    private lineMerge(localContent: string, remoteContent: string): string {
+        const localLines = localContent.split(/\r?\n/);
+        const remoteLines = remoteContent.split(/\r?\n/);
+        
+        // Создаем Set для уникальных строк
+        const mergedLines = new Set<string>();
+        
+        // Добавляем все строки
+        for (const line of localLines) {
+            mergedLines.add(line);
+        }
+        
+        for (const line of remoteLines) {
+            mergedLines.add(line);
+        }
+        
+        // Преобразуем обратно в текст
+        return Array.from(mergedLines).join('\n');
+    }
+    
+    /**
+     * Трехстороннее слияние (three-way merge)
+     * Использует базовую версию для определения изменений в обеих версиях
+     */
+    private threeWayMerge(baseContent: string, localContent: string, remoteContent: string): string {
+        // Проверка входных параметров
+        if (!baseContent || !localContent || !remoteContent) {
+            console.warn("threeWayMerge: Одно из содержимых пусто, используем простое слияние");
+            return this.lineMerge(localContent || "", remoteContent || "");
+        }
+        // Разделяем содержимое на строки
+        const baseLines = baseContent.split(/\r?\n/);
+        const localLines = localContent.split(/\r?\n/);
+        const remoteLines = remoteContent.split(/\r?\n/);
+        
+        // Результирующий массив строк
+        const resultLines: string[] = [];
+        
+        // Индексы для прохода по строкам
+        let baseIndex = 0;
+        let localIndex = 0;
+        let remoteIndex = 0;
+        
+        // Проходим по строкам, сравнивая все три версии
+        while (
+            baseIndex < baseLines.length || 
+            localIndex < localLines.length || 
+            remoteIndex < remoteLines.length
+        ) {
+            // Получаем текущие строки (или null, если достигли конца)
+            const baseLine = baseIndex < baseLines.length ? baseLines[baseIndex] : null;
+            const localLine = localIndex < localLines.length ? localLines[localIndex] : null;
+            const remoteLine = remoteIndex < remoteLines.length ? remoteLines[remoteIndex] : null;
+            
+            // Если все три строки одинаковы, добавляем одну и увеличиваем все индексы
+            if (baseLine === localLine && localLine === remoteLine) {
+                if (localLine !== null) {
+                    resultLines.push(localLine);
+                }
+                baseIndex++;
+                localIndex++;
+                remoteIndex++;
+                continue;
+            }
+            
+            // Если локальная строка совпадает с базовой, но удаленная отличается,
+            // значит, изменение было только в удаленной версии - берем удаленную
+            if (baseLine === localLine && localLine !== remoteLine) {
+                if (remoteLine !== null) {
+                    resultLines.push(remoteLine);
+                }
+                baseIndex++;
+                localIndex++;
+                remoteIndex++;
+                continue;
+            }
+            
+            // Если удаленная строка совпадает с базовой, но локальная отличается,
+            // значит, изменение было только в локальной версии - берем локальную
+            if (baseLine === remoteLine && remoteLine !== localLine) {
+                if (localLine !== null) {
+                    resultLines.push(localLine);
+                }
+                baseIndex++;
+                localIndex++;
+                remoteIndex++;
+                continue;
+            }
+            
+            // Если локальная и удаленная строки совпадают, но отличаются от базовой,
+            // значит, и там и там сделано одинаковое изменение - берем любую
+            if (localLine === remoteLine && localLine !== baseLine) {
+                if (localLine !== null) {
+                    resultLines.push(localLine);
+                }
+                baseIndex++;
+                localIndex++;
+                remoteIndex++;
+                continue;
+            }
+            
+            // Если все строки различаются, у нас конфликт - включаем обе версии с маркерами
+            resultLines.push(`<<<<<<< ЛОКАЛЬНАЯ ВЕРСИЯ`);
+            if (localLine !== null) {
+                resultLines.push(localLine);
+            }
+            resultLines.push(`=======`);
+            if (remoteLine !== null) {
+                resultLines.push(remoteLine);
+            }
+            resultLines.push(`>>>>>>> УДАЛЕННАЯ ВЕРСИЯ`);
+            
+            baseIndex++;
+            localIndex++;
+            remoteIndex++;
+        }
+        
+        // Объединяем строки обратно в текст
+        return resultLines.join('\n');
     }
 
     /**
@@ -1590,8 +2581,16 @@ export class SyncManager {
             // Проверка подключения к серверу
             if (!this.relayClient.isConnected) {
                 console.log("Синхронизация пропущена: нет подключения к серверу");
+                new Notice("Нет соединения с сервером. Синхронизация невозможна.");
                 return;
             }
+            
+            // Запрашиваем актуальный список доверенных устройств
+            console.log("Запрашиваем актуальный список доверенных устройств...");
+            this.relayClient.requestTrustedDevices();
+            
+            // Небольшая задержка для получения ответа от сервера
+            await new Promise(resolve => setTimeout(resolve, 500));
             
             // Получаем текущие доверенные устройства от RelayClient
             const trustedDevices = this.relayClient.getTrustedDevices();
@@ -1601,12 +2600,16 @@ export class SyncManager {
             
             if (this.isSyncing) {
                 console.log("Синхронизация пропущена: уже выполняется синхронизация");
+                new Notice("Синхронизация уже выполняется...");
                 return;
             }
+            
+            console.log(`Список доверенных устройств: ${JSON.stringify(trustedDevices)}`);
             
             // Если мы в режиме ожидания или нет доверенных устройств - проверяем наличие активных устройств
             if (this.waitingMode || !hasTrustedDevices) {
                 console.log(`${this.waitingMode ? 'Плагин в режиме ожидания' : 'Нет доверенных устройств'}. Проверка активности...`);
+                new Notice(`${this.waitingMode ? 'Плагин в режиме ожидания' : 'Нет доверенных устройств'}. Проверка активности...`);
                 
                 // Проверяем наличие активных устройств
                 await this.checkActiveTrustedDevices();
@@ -1614,6 +2617,7 @@ export class SyncManager {
                 // Если после проверки все еще в режиме ожидания, прекращаем синхронизацию
                 if (this.waitingMode) {
                     console.log("После проверки по-прежнему нет активных устройств. Синхронизация отложена.");
+                    new Notice("Нет активных устройств для синхронизации. Убедитесь, что другие устройства включены и подключены.");
                     
                     // Обновляем локальное состояние на всякий случай
                     await this.updateLocalFileState();
@@ -1624,6 +2628,7 @@ export class SyncManager {
                 const updatedTrustedDevices = this.relayClient.getTrustedDevices();
                 if (!Array.isArray(updatedTrustedDevices) || updatedTrustedDevices.length === 0) {
                     console.log("После проверки все еще нет доверенных устройств. Синхронизация отложена.");
+                    new Notice("Нет доверенных устройств для синхронизации. Используйте ключ приглашения для добавления устройств.");
                     return;
                 }
             }
@@ -1639,43 +2644,13 @@ export class SyncManager {
             // Запросим метаданные файлов у других устройств для оптимизации синхронизации
             await this.requestFileMetadata(trustedDevices);
 
-            // Сканируем наши файлы
+            // Начинаем асинхронный анализ файлов для уменьшения блокировки основного потока
             const fileEntries = Object.entries(this.syncState.files);
-            console.log(`Анализ ${fileEntries.length} файлов для интеллектуальной синхронизации...`);
+            console.log(`Начало асинхронного анализа ${fileEntries.length} файлов для интеллектуальной синхронизации...`);
             
-            // Классифицируем файлы
-            const filesForSync: {path: string, metadata: FileMetadata, isNew: boolean, targetDevices: string[]}[] = [];
-            let unchangedFiles = 0;
-            let identicalFiles = 0;
-
-            console.log("СИГНАЛЬНАЯ СИСТЕМА: Проверка метаданных файлов для интеллектуальной синхронизации");
-            
-            // Проверяем каждый файл на необходимость синхронизации
-            for (const [path, metadata] of fileEntries) {
-                // Пропускаем удаленные файлы
-                if (metadata.deleted) {
-                    continue;
-                }
-                
-                // Определяем, нужно ли синхронизировать этот файл и кому
-                const { needsSync, isNew, targetDevices } = this.fileNeedsSync(path, metadata, trustedDevices);
-                
-                if (needsSync && targetDevices.length > 0) {
-                    console.log(`СИГНАЛЬНАЯ СИСТЕМА: Файл '${path}' требует синхронизации с ${targetDevices.length} устройствами`);
-                    filesForSync.push({
-                        path,
-                        metadata,
-                        isNew,
-                        targetDevices
-                    });
-                } else if (isNew && targetDevices.length === 0) {
-                    console.log(`СИГНАЛЬНАЯ СИСТЕМА: Файл '${path}' недавно изменен, но идентичен на всех устройствах`);
-                    identicalFiles++;
-                } else {
-                    console.log(`СИГНАЛЬНАЯ СИСТЕМА: Файл '${path}' не требует синхронизации`);
-                    unchangedFiles++;
-                }
-            }
+            // Классифицируем файлы с помощью асинхронной обработки
+            const { filesForSync, unchangedFiles, identicalFiles } = 
+                await this.analyzeFilesForSync(fileEntries, trustedDevices);
             
             // Проверяем наличие необходимости в синхронизации
             if (filesForSync.length === 0) {
@@ -1971,6 +2946,104 @@ export class SyncManager {
     }
     
     /**
+     * Асинхронная функция для анализа файлов, нуждающихся в синхронизации
+     * Разбивает работу на порции для уменьшения блокировки основного потока
+     */
+    private async analyzeFilesForSync(
+        fileEntries: [string, FileMetadata][],
+        trustedDevices: DeviceInfo[]
+    ): Promise<{
+        filesForSync: {path: string, metadata: FileMetadata, isNew: boolean, targetDevices: string[]}[],
+        unchangedFiles: number,
+        identicalFiles: number
+    }> {
+        const filesForSync: {path: string, metadata: FileMetadata, isNew: boolean, targetDevices: string[]}[] = [];
+        let unchangedFiles = 0;
+        let identicalFiles = 0;
+        
+        console.log("СИГНАЛЬНАЯ СИСТЕМА: Начало асинхронной проверки метаданных файлов");
+        
+        // Определяем размер пакета для обработки за один тик
+        const BATCH_SIZE = 100; // Обработка по 100 файлов за раз
+        
+        // Разбиваем файлы на пакеты
+        for (let i = 0; i < fileEntries.length; i += BATCH_SIZE) {
+            const batch = fileEntries.slice(i, i + BATCH_SIZE);
+            
+            // Используем Promise для асинхронной обработки и предотвращения блокировки UI
+            await new Promise<void>(resolve => {
+                setTimeout(() => {
+                    this.processBatchOfFiles(
+                        batch, 
+                        trustedDevices, 
+                        filesForSync, 
+                        unchangedFiles, 
+                        identicalFiles
+                    );
+                    
+                    // Обновляем счетчики
+                    unchangedFiles = this.batchUnchangedFiles;
+                    identicalFiles = this.batchIdenticalFiles;
+                    
+                    console.log(`СИГНАЛЬНАЯ СИСТЕМА: Обработан пакет ${i/BATCH_SIZE + 1}/${Math.ceil(fileEntries.length/BATCH_SIZE)}, найдено ${filesForSync.length} файлов для синхронизации`);
+                    resolve();
+                }, 0); // Запускаем в следующем тике Event Loop
+            });
+        }
+        
+        console.log(`СИГНАЛЬНАЯ СИСТЕМА: Анализ завершен. Файлов для синхронизации: ${filesForSync.length}, 
+            идентичных на всех устройствах: ${identicalFiles}, не требующих обновления: ${unchangedFiles}`);
+        
+        return { filesForSync, unchangedFiles, identicalFiles };
+    }
+    
+    // Счетчики для batchProcessor
+    private batchUnchangedFiles = 0;
+    private batchIdenticalFiles = 0;
+    
+    /**
+     * Обработать пакет файлов и определить, какие из них нуждаются в синхронизации
+     */
+    private processBatchOfFiles(
+        batch: [string, FileMetadata][],
+        trustedDevices: DeviceInfo[],
+        filesForSync: {path: string, metadata: FileMetadata, isNew: boolean, targetDevices: string[]}[],
+        unchangedFilesStart: number,
+        identicalFilesStart: number
+    ): void {
+        // Устанавливаем начальные значения счетчиков
+        this.batchUnchangedFiles = unchangedFilesStart;
+        this.batchIdenticalFiles = identicalFilesStart;
+        
+        // Проверяем каждый файл в пакете
+        for (const [path, metadata] of batch) {
+            // Пропускаем удаленные файлы
+            if (metadata.deleted) {
+                continue;
+            }
+            
+            // Определяем, нужно ли синхронизировать этот файл и кому
+            const { needsSync, isNew, targetDevices } = this.fileNeedsSync(path, metadata, trustedDevices);
+            
+            if (needsSync && targetDevices.length > 0) {
+                console.log(`СИГНАЛЬНАЯ СИСТЕМА: Файл '${path}' требует синхронизации с ${targetDevices.length} устройствами`);
+                filesForSync.push({
+                    path,
+                    metadata,
+                    isNew,
+                    targetDevices
+                });
+            } else if (isNew && targetDevices.length === 0) {
+                console.log(`СИГНАЛЬНАЯ СИСТЕМА: Файл '${path}' недавно изменен, но идентичен на всех устройствах`);
+                this.batchIdenticalFiles++;
+            } else {
+                console.log(`СИГНАЛЬНАЯ СИСТЕМА: Файл '${path}' не требует синхронизации`);
+                this.batchUnchangedFiles++;
+            }
+        }
+    }
+
+    /**
      * Определить, нужно ли синхронизировать файл с другими устройствами
      * на основе сравнения локальных метаданных и метаданных с других устройств
      */
@@ -1993,7 +3066,8 @@ export class SyncManager {
             
             // Если у нас нет метаданных с устройства, считаем что ему нужна синхронизация
             if (!deviceMetadata) {
-                console.log(`СИГНАЛЬНАЯ СИСТЕМА: Нет метаданных с устройства ${deviceName} для файла ${path}`);
+                // Минимизируем логи в высоконагруженных операциях
+                // console.log(`СИГНАЛЬНАЯ СИСТЕМА: Нет метаданных с устройства ${deviceName} для файла ${path}`);
                 targetDevices.push(deviceId);
                 needsSync = true;
                 continue;
@@ -2004,7 +3078,8 @@ export class SyncManager {
             
             // Если файла нет на удаленном устройстве, ему нужна синхронизация
             if (!remoteFile) {
-                console.log(`СИГНАЛЬНАЯ СИСТЕМА: Файл ${path} отсутствует на устройстве ${deviceName}`);
+                // Минимизируем логи в высоконагруженных операциях
+                // console.log(`СИГНАЛЬНАЯ СИСТЕМА: Файл ${path} отсутствует на устройстве ${deviceName}`);
                 targetDevices.push(deviceId);
                 needsSync = true;
                 continue;
@@ -2012,7 +3087,8 @@ export class SyncManager {
             
             // Если хеш отличается, нужна синхронизация
             if (remoteFile.hash !== metadata.hash) {
-                console.log(`СИГНАЛЬНАЯ СИСТЕМА: Хеши файла ${path} различаются: локальный ${metadata.hash.substring(0, 8)}, удаленный ${remoteFile.hash.substring(0, 8)}`);
+                // Минимизируем логи в высоконагруженных операциях
+                // console.log(`СИГНАЛЬНАЯ СИСТЕМА: Хеши файла ${path} различаются: локальный ${metadata.hash.substring(0, 8)}, удаленный ${remoteFile.hash.substring(0, 8)}`);
                 targetDevices.push(deviceId);
                 needsSync = true;
                 continue;
@@ -2020,30 +3096,51 @@ export class SyncManager {
             
             // Если время модификации новее, нужна синхронизация
             if (metadata.mtime > remoteFile.mtime) {
-                console.log(`СИГНАЛЬНАЯ СИСТЕМА: Время модификации файла ${path} новее: локальное ${new Date(metadata.mtime).toISOString()}, удаленное ${new Date(remoteFile.mtime).toISOString()}`);
+                // Минимизируем логи в высоконагруженных операциях
+                // console.log(`СИГНАЛЬНАЯ СИСТЕМА: Время модификации файла ${path} новее: локальное ${new Date(metadata.mtime).toISOString()}, удаленное ${new Date(remoteFile.mtime).toISOString()}`);
                 targetDevices.push(deviceId);
                 needsSync = true;
-            } else {
-                console.log(`СИГНАЛЬНАЯ СИСТЕМА: Файл ${path} идентичен на устройстве ${deviceName}`);
             }
         }
         
         // Для недавно измененных файлов проверяем, нужна ли синхронизация
         // ВАЖНО: мы не будем передавать файлы, если они идентичны на всех устройствах
         if (isNew && targetDevices.length === 0) {
-            // Добавляем более подробное логирование
-            console.log(`Файл ${path} недавно изменен, но метаданные идентичны на всех устройствах - синхронизация не требуется`);
             needsSync = false;
         } 
         // Если есть устройства, нуждающиеся в синхронизации
         else if (isNew && targetDevices.length > 0) {
-            console.log(`Файл ${path} недавно изменен, будет синхронизирован с ${targetDevices.length} устройствами`);
             needsSync = true;
         }
         
         return { needsSync, isNew, targetDevices };
     }
     
+    /**
+     * Умная синхронизация - синхронизирует только нужные файлы, предотвращая блокировку UI
+     */
+    public async performSmartSync(): Promise<void> {
+        // Если нет накопленных изменений, не делаем ничего
+        if (this.pendingChangesCount <= 0) {
+            console.log("Нет изменений для синхронизации");
+            return;
+        }
+        
+        // Асинхронная обработка для снижения блокировки UI
+        return new Promise((resolve) => {
+            // Запускаем синхронизацию в следующем тике, чтобы не блокировать UI
+            setTimeout(async () => {
+                try {
+                    await this.performFullSync();
+                    resolve();
+                } catch (error) {
+                    console.error("Ошибка при выполнении умной синхронизации:", error);
+                    resolve(); // Разрешаем промис даже при ошибке
+                }
+            }, 50); // Небольшая задержка для обработки UI событий
+        });
+    }
+
     /**
      * Запустить принудительную полную синхронизацию
      */
@@ -2059,35 +3156,78 @@ export class SyncManager {
     }
 
     /**
-     * Обновить локальное состояние файлов
+     * Обновить локальное состояние файлов с асинхронной обработкой
+     * для минимизации блокировки основного потока
      */
     private async updateLocalFileState(): Promise<void> {
         // Получаем текущие файлы
         const changes = await this.fileWatcher.scanAllFiles();
+        console.log(`Сканирование завершено, найдено ${changes.length} файлов. Начинаем асинхронную обработку...`);
         
         // Получаем новое состояние
         const newState: Record<string, FileMetadata> = {};
         
-        // Обрабатываем каждый файл
-        for (const change of changes) {
-            const file = change.file;
-            const content = await this.app.vault.read(file);
-            const hash = await CryptoHelper.hashString(content);
+        // Определяем размер пакета
+        const BATCH_SIZE = 50; // Обрабатываем по 50 файлов за один раз
+        
+        // Обрабатываем файлы пачками для уменьшения блокировки UI
+        for (let i = 0; i < changes.length; i += BATCH_SIZE) {
+            const batch = changes.slice(i, i + BATCH_SIZE);
             
-            newState[file.path] = {
-                path: file.path,
-                hash,
-                mtime: file.stat.mtime,
-                size: file.stat.size
-            };
+            // Обрабатываем пачку асинхронно
+            await new Promise<void>(resolve => {
+                setTimeout(async () => {
+                    try {
+                        for (const change of batch) {
+                            try {
+                                const file = change.file;
+                                const content = await this.app.vault.read(file);
+                                const hash = await CryptoHelper.hashString(content);
+                                
+                                newState[file.path] = {
+                                    path: file.path,
+                                    hash,
+                                    mtime: file.stat.mtime,
+                                    size: file.stat.size
+                                };
+                            } catch (fileError) {
+                                console.error(`Ошибка при обработке файла ${change.file.path}:`, fileError);
+                            }
+                        }
+                        
+                        console.log(`Обработана пачка ${Math.floor(i / BATCH_SIZE) + 1}/${Math.ceil(changes.length / BATCH_SIZE)}: ${batch.length} файлов`);
+                        resolve();
+                    } catch (batchError) {
+                        console.error("Ошибка при обработке пачки файлов:", batchError);
+                        resolve();
+                    }
+                }, 0);
+            });
         }
         
-        // Сохраняем удаленные файлы из предыдущего состояния
-        for (const [path, metadata] of Object.entries(this.syncState.files)) {
-            if (metadata.deleted && !newState[path]) {
-                newState[path] = metadata;
-            }
+        console.log("Асинхронная обработка завершена, добавляем удаленные файлы из предыдущего состояния...");
+        
+        // Сохраняем удаленные файлы из предыдущего состояния асинхронно
+        const deletedEntries = Object.entries(this.syncState.files)
+            .filter(([_, metadata]) => metadata.deleted);
+        
+        // Обрабатываем удаленные файлы пачками
+        for (let i = 0; i < deletedEntries.length; i += BATCH_SIZE) {
+            const batch = deletedEntries.slice(i, i + BATCH_SIZE);
+            
+            await new Promise<void>(resolve => {
+                setTimeout(() => {
+                    for (const [path, metadata] of batch) {
+                        if (!newState[path]) {
+                            newState[path] = metadata;
+                        }
+                    }
+                    resolve();
+                }, 0);
+            });
         }
+        
+        console.log("Обновление состояния завершено.");
         
         // Обновляем состояние
         this.syncState.files = newState;
@@ -2096,31 +3236,205 @@ export class SyncManager {
 
     /**
      * Загрузить состояние синхронизации из локального хранилища
+     * с оптимизацией для больших состояний
      */
     private loadSyncState(): SyncState {
-        const savedState = localStorage.getItem('relay-sync-state');
-        
-        if (savedState) {
-            try {
-                return JSON.parse(savedState);
-            } catch (error) {
-                console.error("Error parsing saved sync state:", error);
+        try {
+            // Загружаем основные метаданные
+            const savedStateBase = localStorage.getItem('relay-sync-state-base');
+            
+            if (!savedStateBase) {
+                // Если нет базовых метаданных, возвращаем начальное состояние
+                return this.createInitialState();
             }
+            
+            // Парсим базовые метаданные
+            const baseState = JSON.parse(savedStateBase);
+            
+            // Проверяем версию формата сохранения
+            const stateVersion = baseState.stateVersion || 1;
+            
+            if (stateVersion >= 2) {
+                // Новый формат с разделением на части
+                return this.loadSegmentedState(baseState);
+            }
+            
+            // Старый формат - монолитное хранение состояния
+            const savedState = localStorage.getItem('relay-sync-state');
+            if (savedState) {
+                try {
+                    return JSON.parse(savedState);
+                } catch (error) {
+                    console.error("Error parsing saved sync state:", error);
+                    // Пробуем загрузить сегментированное состояние как резервный вариант
+                    return this.loadSegmentedState(baseState);
+                }
+            }
+            
+            // Если не удалось загрузить ни по старому, ни по новому формату
+            return this.createInitialState();
+        } catch (error) {
+            console.error("Error loading sync state:", error);
+            return this.createInitialState();
         }
-        
-        // Возвращаем начальное состояние, если сохраненное отсутствует или повреждено
+    }
+    
+    /**
+     * Создаст начальное состояние синхронизации
+     */
+    private createInitialState(): SyncState {
         return {
             deviceId: DeviceManager.getDeviceId(),
             files: {},
             lastSyncTime: 0
         };
     }
+    
+    /**
+     * Загружает сегментированное состояние (новый формат)
+     */
+    private loadSegmentedState(baseState: any): SyncState {
+        try {
+            // Базовое состояние без файлов
+            const state: SyncState = {
+                deviceId: baseState.deviceId || DeviceManager.getDeviceId(),
+                files: {},
+                lastSyncTime: baseState.lastSyncTime || 0
+            };
+            
+            // Получаем список сегментов
+            const segmentIds = baseState.segments || [];
+            console.log(`Загрузка сегментированного состояния: найдено ${segmentIds.length} сегментов`);
+            
+            // Загружаем и объединяем все сегменты
+            for (const segmentId of segmentIds) {
+                const segmentKey = `relay-sync-files-${segmentId}`;
+                const segmentData = localStorage.getItem(segmentKey);
+                
+                if (segmentData) {
+                    try {
+                        const segment = JSON.parse(segmentData);
+                        
+                        // Объединяем файлы из сегмента с общим состоянием
+                        if (segment.files && typeof segment.files === 'object') {
+                            state.files = { ...state.files, ...segment.files };
+                        }
+                    } catch (segmentError) {
+                        console.error(`Error parsing segment ${segmentId}:`, segmentError);
+                    }
+                }
+            }
+            
+            console.log(`Загружено состояние с ${Object.keys(state.files).length} файлами`);
+            return state;
+        } catch (error) {
+            console.error("Error loading segmented state:", error);
+            return this.createInitialState();
+        }
+    }
 
     /**
      * Сохранить состояние синхронизации в локальное хранилище
+     * с оптимизацией для больших состояний
      */
     private saveSyncState(): void {
-        localStorage.setItem('relay-sync-state', JSON.stringify(this.syncState));
+        try {
+            // Получаем количество файлов для анализа
+            const filesCount = Object.keys(this.syncState.files).length;
+            
+            // Для небольших состояний используем старый формат для совместимости
+            if (filesCount < 100) {
+                localStorage.setItem('relay-sync-state', JSON.stringify(this.syncState));
+                return;
+            }
+            
+            // Для больших состояний используем сегментированное хранение
+            this.saveSegmentedState();
+        } catch (error) {
+            console.error("Error saving sync state:", error);
+            
+            // Пробуем использовать сегментированное сохранение как резервный вариант
+            try {
+                this.saveSegmentedState();
+            } catch (backupError) {
+                console.error("Failed to save state using backup method:", backupError);
+            }
+        }
+    }
+    
+    /**
+     * Сохраняет состояние в сегментированном формате
+     */
+    private saveSegmentedState(): void {
+        // Группируем файлы по сегментам
+        const MAX_SEGMENT_SIZE = 500; // Максимальное количество файлов в одном сегменте
+        const files = Object.entries(this.syncState.files);
+        const segmentCount = Math.ceil(files.length / MAX_SEGMENT_SIZE);
+        const segments: string[] = [];
+        
+        console.log(`Сохранение сегментированного состояния: ${files.length} файлов в ${segmentCount} сегментах`);
+        
+        // Создаем сегменты
+        for (let i = 0; i < segmentCount; i++) {
+            const segmentFiles = files.slice(i * MAX_SEGMENT_SIZE, (i + 1) * MAX_SEGMENT_SIZE);
+            const segmentId = `segment_${i}_${Date.now()}`;
+            segments.push(segmentId);
+            
+            // Преобразуем массив [key, value] обратно в объект
+            const segmentFilesObj = Object.fromEntries(segmentFiles);
+            
+            // Сохраняем сегмент
+            const segmentData = JSON.stringify({
+                files: segmentFilesObj,
+                timestamp: Date.now()
+            });
+            
+            localStorage.setItem(`relay-sync-files-${segmentId}`, segmentData);
+        }
+        
+        // Сохраняем основные метаданные
+        const baseState = {
+            deviceId: this.syncState.deviceId,
+            lastSyncTime: this.syncState.lastSyncTime,
+            segments,
+            stateVersion: 2,  // Версия формата хранения
+            timestamp: Date.now()
+        };
+        
+        localStorage.setItem('relay-sync-state-base', JSON.stringify(baseState));
+        
+        // Очищаем старое состояние, если оно существует
+        localStorage.removeItem('relay-sync-state');
+        
+        // Очищаем старые сегменты, которые больше не используются
+        this.cleanupOldSegments(segments);
+    }
+    
+    /**
+     * Очищает старые сегменты, которые не используются
+     */
+    private cleanupOldSegments(currentSegments: string[]): void {
+        try {
+            // Создаем множество текущих сегментов для быстрой проверки
+            const currentSegmentsSet = new Set(currentSegments);
+            
+            // Проверяем все элементы localStorage на наличие старых сегментов
+            for (let i = 0; i < localStorage.length; i++) {
+                const key = localStorage.key(i);
+                
+                if (key && key.startsWith('relay-sync-files-')) {
+                    const segmentId = key.replace('relay-sync-files-', '');
+                    
+                    if (!currentSegmentsSet.has(segmentId)) {
+                        // Если сегмент больше не используется, удаляем его
+                        localStorage.removeItem(key);
+                        console.log(`Удален устаревший сегмент: ${segmentId}`);
+                    }
+                }
+            }
+        } catch (error) {
+            console.error("Error cleaning up old segments:", error);
+        }
     }
 
     /**

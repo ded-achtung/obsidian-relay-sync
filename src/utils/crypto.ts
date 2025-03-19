@@ -177,4 +177,22 @@ export class CryptoHelper {
         
         return this.arrayBufferToBase64(hash);
     }
+
+    /**
+     * Разделяет файл на фрагменты заданного размера
+     */
+    public static chunkFile(fileContent: string, chunkSize: number): string[] {
+        const chunks = [];
+        for (let i = 0; i < fileContent.length; i += chunkSize) {
+            chunks.push(fileContent.slice(i, i + chunkSize));
+        }
+        return chunks;
+    }
+
+    /**
+     * Собирает файл из фрагментов
+     */
+    public static reassembleFile(chunks: string[]): string {
+        return chunks.join('');
+    }
 }

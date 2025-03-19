@@ -654,6 +654,56 @@ export class RelaySyncSettingsTab extends PluginSettingTab {
             }
         }
         
+        // Секция обновлений
+        containerEl.createEl('h3', { text: 'Обновления' });
+        
+        // Автоматическая проверка обновлений
+        new Setting(containerEl)
+            .setName('Автоматическая проверка обновлений')
+            .setDesc('Периодически проверять наличие обновлений плагина')
+            .addToggle(toggle => toggle
+                .setValue(this.plugin.settings.autoCheckForUpdates)
+                .onChange(async (value) => {
+                    this.plugin.settings.autoCheckForUpdates = value;
+                    await this.plugin.saveSettings();
+                })
+            );
+        
+        // Интервал проверки обновлений
+        new Setting(containerEl)
+            .setName('Интервал проверки обновлений')
+            .setDesc('Как часто проверять наличие обновлений (в днях)')
+            .addText(text => text
+                .setPlaceholder('1')
+                .setValue(String(this.plugin.settings.updateCheckInterval || 1))
+                .onChange(async (value) => {
+                    const days = parseInt(value) || 1;
+                    this.plugin.settings.updateCheckInterval = days;
+                    await this.plugin.saveSettings();
+                })
+            );
+        
+        // Кнопка проверки обновлений
+        new Setting(containerEl)
+            .setName('Проверить обновления')
+            .setDesc('Проверить наличие обновлений плагина')
+            .addButton(button => button
+                .setButtonText('Проверить')
+                .onClick(async () => {
+                    button.setButtonText('Проверка...');
+                    button.setDisabled(true);
+                    
+                    try {
+                        await this.plugin.checkForUpdates(true);
+                    } catch (error) {
+                        console.error('Error checking for updates:', error);
+                    } finally {
+                        button.setButtonText('Проверить');
+                        button.setDisabled(false);
+                    }
+                })
+            );
+        
         // Секция исключений
         containerEl.createEl('h3', { text: 'Исключения' });
         
