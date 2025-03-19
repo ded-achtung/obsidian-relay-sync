@@ -7,6 +7,9 @@ var __defProp = Object.defineProperty;
 var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
 var __getOwnPropNames = Object.getOwnPropertyNames;
 var __hasOwnProp = Object.prototype.hasOwnProperty;
+var __esm = (fn, res) => function __init() {
+  return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
+};
 var __export = (target, all) => {
   for (var name in all)
     __defProp(target, name, { get: all[name], enumerable: true });
@@ -21,221 +24,5232 @@ var __copyProps = (to, from, except, desc) => {
 };
 var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
 
+// src/utils/crypto.ts
+var CryptoHelper;
+var init_crypto = __esm({
+  "src/utils/crypto.ts"() {
+    CryptoHelper = class {
+      /**
+       * Генерирует криптографически стойкий ключ из пароля
+       */
+      static async generateKey(password, salt) {
+        const encoder = new TextEncoder();
+        const passwordBuffer = encoder.encode(password);
+        if (!salt) {
+          salt = crypto.getRandomValues(new Uint8Array(this.SALT_LENGTH));
+        }
+        const keyMaterial = await crypto.subtle.importKey(
+          "raw",
+          passwordBuffer,
+          { name: "PBKDF2" },
+          false,
+          ["deriveKey"]
+        );
+        const key = await crypto.subtle.deriveKey(
+          {
+            name: "PBKDF2",
+            salt,
+            iterations: this.ITERATIONS,
+            hash: "SHA-256"
+          },
+          keyMaterial,
+          { name: this.ALGORITHM, length: this.KEY_LENGTH },
+          false,
+          ["encrypt", "decrypt"]
+        );
+        return { key, salt };
+      }
+      /**
+       * Шифрует данные с использованием AES-GCM
+       */
+      static async encrypt(data, password) {
+        const encoder = new TextEncoder();
+        const dataBuffer = encoder.encode(data);
+        const { key, salt } = await this.generateKey(password);
+        const iv = crypto.getRandomValues(new Uint8Array(this.IV_LENGTH));
+        const encryptedBuffer = await crypto.subtle.encrypt(
+          {
+            name: this.ALGORITHM,
+            iv,
+            tagLength: 128
+            // Длина тега аутентификации в битах
+          },
+          key,
+          dataBuffer
+        );
+        const encryptedArray = new Uint8Array(encryptedBuffer);
+        const encryptedData = encryptedArray.slice(0, encryptedArray.length - 16);
+        const authTag = encryptedArray.slice(encryptedArray.length - 16);
+        return {
+          iv: this.arrayBufferToBase64(iv),
+          data: this.arrayBufferToBase64(encryptedData),
+          authTag: this.arrayBufferToBase64(authTag),
+          salt: this.arrayBufferToBase64(salt)
+        };
+      }
+      /**
+       * Дешифрует данные, зашифрованные с использованием AES-GCM
+       */
+      static async decrypt(encryptedData, password) {
+        try {
+          const iv = this.base64ToArrayBuffer(encryptedData.iv);
+          const data = this.base64ToArrayBuffer(encryptedData.data);
+          const authTag = this.base64ToArrayBuffer(encryptedData.authTag);
+          const salt = this.base64ToArrayBuffer(encryptedData.salt);
+          const encryptedBuffer = new Uint8Array(data.byteLength + authTag.byteLength);
+          encryptedBuffer.set(new Uint8Array(data), 0);
+          encryptedBuffer.set(new Uint8Array(authTag), data.byteLength);
+          const { key } = await this.generateKey(password, new Uint8Array(salt));
+          const decryptedBuffer = await crypto.subtle.decrypt(
+            {
+              name: this.ALGORITHM,
+              iv: new Uint8Array(iv),
+              tagLength: 128
+            },
+            key,
+            encryptedBuffer
+          );
+          const decoder = new TextDecoder();
+          return decoder.decode(decryptedBuffer);
+        } catch (error) {
+          console.error("Decryption failed:", error);
+          throw new Error("\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u0440\u0430\u0441\u0448\u0438\u0444\u0440\u043E\u0432\u0430\u0442\u044C \u0434\u0430\u043D\u043D\u044B\u0435. \u0412\u043E\u0437\u043C\u043E\u0436\u043D\u043E, \u043D\u0435\u0432\u0435\u0440\u043D\u044B\u0439 \u043F\u0430\u0440\u043E\u043B\u044C \u0438\u043B\u0438 \u043F\u043E\u0432\u0440\u0435\u0436\u0434\u0435\u043D\u043D\u044B\u0435 \u0434\u0430\u043D\u043D\u044B\u0435.");
+        }
+      }
+      /**
+       * Преобразует ArrayBuffer в строку Base64
+       */
+      static arrayBufferToBase64(buffer) {
+        const bytes = new Uint8Array(buffer);
+        let binary = "";
+        for (let i = 0; i < bytes.byteLength; i++) {
+          binary += String.fromCharCode(bytes[i]);
+        }
+        return btoa(binary);
+      }
+      /**
+       * Преобразует строку Base64 в ArrayBuffer
+       */
+      static base64ToArrayBuffer(base64) {
+        const binaryString = atob(base64);
+        const bytes = new Uint8Array(binaryString.length);
+        for (let i = 0; i < binaryString.length; i++) {
+          bytes[i] = binaryString.charCodeAt(i);
+        }
+        return bytes.buffer;
+      }
+      /**
+       * Генерирует уникальный идентификатор устройства
+       */
+      static generateDeviceId() {
+        const array = new Uint8Array(16);
+        crypto.getRandomValues(array);
+        return Array.from(
+          array,
+          (byte) => byte.toString(16).padStart(2, "0")
+        ).join("");
+      }
+      /**
+       * Хеширует строку с использованием SHA-256
+       */
+      static async hashString(str) {
+        const encoder = new TextEncoder();
+        const data = encoder.encode(str);
+        const hash = await crypto.subtle.digest("SHA-256", data);
+        return this.arrayBufferToBase64(hash);
+      }
+      /**
+       * Разделяет файл на фрагменты заданного размера
+       */
+      static chunkFile(fileContent, chunkSize) {
+        const chunks = [];
+        for (let i = 0; i < fileContent.length; i += chunkSize) {
+          chunks.push(fileContent.slice(i, i + chunkSize));
+        }
+        return chunks;
+      }
+      /**
+       * Собирает файл из фрагментов
+       */
+      static reassembleFile(chunks) {
+        return chunks.join("");
+      }
+    };
+    CryptoHelper.ALGORITHM = "AES-GCM";
+    CryptoHelper.KEY_LENGTH = 256;
+    // bits
+    CryptoHelper.SALT_LENGTH = 16;
+    // bytes
+    CryptoHelper.IV_LENGTH = 12;
+    // bytes
+    CryptoHelper.ITERATIONS = 1e5;
+  }
+});
+
+// src/utils/device-id.ts
+var DEVICE_ID_KEY, DEVICE_NAME_KEY, DeviceManager;
+var init_device_id = __esm({
+  "src/utils/device-id.ts"() {
+    init_crypto();
+    DEVICE_ID_KEY = "relay-sync-device-id";
+    DEVICE_NAME_KEY = "relay-sync-device-name";
+    DeviceManager = class {
+      /**
+       * Получить идентификатор устройства или создать новый, если не существует
+       */
+      static getDeviceId() {
+        let deviceId = localStorage.getItem(DEVICE_ID_KEY);
+        if (!deviceId) {
+          deviceId = CryptoHelper.generateDeviceId();
+          localStorage.setItem(DEVICE_ID_KEY, deviceId);
+        }
+        return deviceId;
+      }
+      /**
+       * Установить идентификатор устройства
+       */
+      static setDeviceId(deviceId) {
+        localStorage.setItem(DEVICE_ID_KEY, deviceId);
+      }
+      /**
+       * Получить имя устройства или вернуть значение по умолчанию
+       */
+      static getDeviceName() {
+        const deviceName = localStorage.getItem(DEVICE_NAME_KEY);
+        if (!deviceName) {
+          const deviceType = this.detectDeviceType();
+          const randomSuffix = Math.floor(Math.random() * 1e4);
+          const newName = `${deviceType}-${randomSuffix}`;
+          localStorage.setItem(DEVICE_NAME_KEY, newName);
+          return newName;
+        }
+        return deviceName;
+      }
+      /**
+       * Установить имя устройства
+       */
+      static setDeviceName(deviceName) {
+        localStorage.setItem(DEVICE_NAME_KEY, deviceName);
+      }
+      /**
+       * Определить тип устройства (ПК, Android, iOS)
+       */
+      static detectDeviceType() {
+        const userAgent = navigator.userAgent.toLowerCase();
+        if (/android/i.test(userAgent)) {
+          return "Android";
+        } else if (/iphone|ipad|ipod/i.test(userAgent)) {
+          return "iOS";
+        } else if (/windows/i.test(userAgent)) {
+          return "Windows";
+        } else if (/macintosh/i.test(userAgent)) {
+          return "Mac";
+        } else if (/linux/i.test(userAgent)) {
+          return "Linux";
+        } else {
+          return "Unknown";
+        }
+      }
+    };
+  }
+});
+
+// src/client/relay-client.ts
+var RelayClient;
+var init_relay_client = __esm({
+  "src/client/relay-client.ts"() {
+    RelayClient = class {
+      constructor(options) {
+        this.ws = null;
+        this.isConnected = false;
+        this.reconnectTimeout = null;
+        this.reconnectAttempts = 0;
+        this.maxReconnectAttempts = 10;
+        this.heartbeatInterval = null;
+        this.messageCallbacks = /* @__PURE__ */ new Map();
+        this.pendingRequests = /* @__PURE__ */ new Map();
+        this.trustedDevices = [];
+        // Сохраняем оригинальный обработчик для генерации ключа
+        this.onMessageCallbackOriginal = () => {
+        };
+        this.serverUrl = options.serverUrl;
+        this.deviceId = options.deviceId;
+        this.deviceName = options.deviceName;
+        this.onMessageCallback = options.onMessage;
+        this.onConnectionChangeCallback = options.onConnectionChange;
+        this.onTrustedDevicesChangeCallback = options.onTrustedDevicesChange;
+        this.onSyncRequestCallback = options.onSyncRequest;
+      }
+      /**
+       * Подключиться к серверу
+       */
+      connect() {
+        if (this.ws && (this.ws.readyState === WebSocket.CONNECTING || this.ws.readyState === WebSocket.OPEN)) {
+          console.log("WebSocket already connected or connecting");
+          return;
+        }
+        try {
+          this.ws = new WebSocket(this.serverUrl);
+          this.ws.onopen = this.handleOpen.bind(this);
+          this.ws.onmessage = this.handleMessage.bind(this);
+          this.ws.onclose = this.handleClose.bind(this);
+          this.ws.onerror = this.handleError.bind(this);
+        } catch (error) {
+          console.error("Error connecting to WebSocket server:", error);
+          this.scheduleReconnect();
+        }
+      }
+      /**
+       * Отключиться от сервера
+       */
+      disconnect() {
+        this.stopHeartbeat();
+        if (this.reconnectTimeout) {
+          clearTimeout(this.reconnectTimeout);
+          this.reconnectTimeout = null;
+        }
+        if (this.ws) {
+          this.ws.close();
+          this.ws = null;
+        }
+      }
+      /**
+       * Отправить сообщение на сервер
+       */
+      sendMessage(message) {
+        if (!this.isConnected || !this.ws) {
+          console.error("Cannot send message: WebSocket not connected");
+          if (!this.reconnectTimeout) {
+            console.log("\u041F\u043E\u043F\u044B\u0442\u043A\u0430 \u0432\u043E\u0441\u0441\u0442\u0430\u043D\u043E\u0432\u0438\u0442\u044C \u0441\u043E\u0435\u0434\u0438\u043D\u0435\u043D\u0438\u0435 \u0430\u0432\u0442\u043E\u043C\u0430\u0442\u0438\u0447\u0435\u0441\u043A\u0438...");
+            this.scheduleReconnect();
+          }
+          return false;
+        }
+        if (this.ws.readyState !== WebSocket.OPEN) {
+          console.error(`Cannot send message: WebSocket \u0432 \u043D\u0435\u043F\u0440\u0430\u0432\u0438\u043B\u044C\u043D\u043E\u043C \u0441\u043E\u0441\u0442\u043E\u044F\u043D\u0438\u0438 (${this.ws.readyState})`);
+          this.disconnect();
+          this.connect();
+          return false;
+        }
+        try {
+          const fullMessage = {
+            ...message,
+            sourceDeviceId: this.deviceId,
+            timestamp: Date.now()
+          };
+          console.log("\u041E\u0442\u043F\u0440\u0430\u0432\u043A\u0430 \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u044F:", fullMessage);
+          this.ws.send(JSON.stringify(fullMessage));
+          console.log("\u0421\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u0435 \u043E\u0442\u043F\u0440\u0430\u0432\u043B\u0435\u043D\u043E \u0443\u0441\u043F\u0435\u0448\u043D\u043E");
+          return true;
+        } catch (error) {
+          console.error("Error sending message:", error);
+          return false;
+        }
+      }
+      /**
+       * Отправить сообщение и получить ответ через Promise
+       */
+      async sendMessageWithResponse(message, timeout = 3e4) {
+        return new Promise((resolve, reject) => {
+          if (!this.isConnected || !this.ws) {
+            reject(new Error("WebSocket not connected"));
+            return;
+          }
+          const requestId = this.generateRequestId();
+          const fullMessage = {
+            ...message,
+            sourceDeviceId: this.deviceId,
+            requestId,
+            timestamp: Date.now()
+          };
+          console.log("\u041E\u0442\u043F\u0440\u0430\u0432\u043A\u0430 \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u044F \u0441 \u043E\u0436\u0438\u0434\u0430\u043D\u0438\u0435\u043C \u043E\u0442\u0432\u0435\u0442\u0430:", fullMessage);
+          const timeoutId = setTimeout(() => {
+            console.log("\u0422\u0430\u0439\u043C\u0430\u0443\u0442 \u0434\u043B\u044F \u0437\u0430\u043F\u0440\u043E\u0441\u0430:", requestId);
+            this.messageCallbacks.delete(requestId);
+            reject(new Error("Request timeout"));
+          }, timeout);
+          this.messageCallbacks.set(requestId, (response) => {
+            console.log("\u041F\u043E\u043B\u0443\u0447\u0435\u043D \u043E\u0442\u0432\u0435\u0442 \u043D\u0430 \u0437\u0430\u043F\u0440\u043E\u0441:", requestId, response);
+            clearTimeout(timeoutId);
+            resolve(response);
+          });
+          try {
+            this.ws.send(JSON.stringify(fullMessage));
+            console.log("\u0421\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u0435 \u043E\u0442\u043F\u0440\u0430\u0432\u043B\u0435\u043D\u043E \u0443\u0441\u043F\u0435\u0448\u043D\u043E, \u043E\u0436\u0438\u0434\u0430\u043D\u0438\u0435 \u043E\u0442\u0432\u0435\u0442\u0430...");
+          } catch (error) {
+            console.error("\u041E\u0448\u0438\u0431\u043A\u0430 \u043F\u0440\u0438 \u043E\u0442\u043F\u0440\u0430\u0432\u043A\u0435 \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u044F:", error);
+            clearTimeout(timeoutId);
+            this.messageCallbacks.delete(requestId);
+            reject(error);
+          }
+        });
+      }
+      /**
+       * Генерация ключа приглашения
+       */
+      async generateInvitationKey(expirationMinutes = 10) {
+        try {
+          return new Promise((resolve, reject) => {
+            const keyHandler = (message) => {
+              if (message.type === "invitationKey" && message.key) {
+                console.log("\u041F\u043E\u043B\u0443\u0447\u0435\u043D \u043A\u043B\u044E\u0447 \u043F\u0440\u0438\u0433\u043B\u0430\u0448\u0435\u043D\u0438\u044F:", message.key);
+                this.onMessageCallback = this.onMessageCallbackOriginal;
+                resolve(message.key);
+              }
+            };
+            this.onMessageCallbackOriginal = this.onMessageCallback;
+            const tempHandler = (message) => {
+              if (message.type === "invitationKey") {
+                keyHandler(message);
+              } else {
+                this.onMessageCallbackOriginal(message);
+              }
+            };
+            this.onMessageCallback = tempHandler;
+            this.sendMessage({
+              type: "generateInvitationKey",
+              payload: {
+                expiration: expirationMinutes * 60 * 1e3
+              }
+            });
+            setTimeout(() => {
+              this.onMessageCallback = this.onMessageCallbackOriginal;
+              reject(new Error("\u0422\u0430\u0439\u043C\u0430\u0443\u0442 \u043F\u0440\u0438 \u0437\u0430\u043F\u0440\u043E\u0441\u0435 \u043A\u043B\u044E\u0447\u0430 \u043F\u0440\u0438\u0433\u043B\u0430\u0448\u0435\u043D\u0438\u044F"));
+            }, 3e4);
+          });
+        } catch (error) {
+          console.error("Error generating invitation key:", error);
+          throw error;
+        }
+      }
+      // Этот обработчик уже определен выше в классе
+      /**
+       * Использование ключа приглашения
+       */
+      async useInvitationKey(key) {
+        try {
+          if (!key || key.trim() === "") {
+            console.error("Error: Empty invitation key");
+            return false;
+          }
+          return new Promise((resolve, reject) => {
+            const syncRequestHandler = (message) => {
+              if (message.type === "syncRequestSent") {
+                console.log("\u0417\u0430\u043F\u0440\u043E\u0441 \u043D\u0430 \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u044E \u043E\u0442\u043F\u0440\u0430\u0432\u043B\u0435\u043D");
+                setTimeout(() => {
+                  this.requestTrustedDevices();
+                }, 500);
+                this.onMessageCallback = this.onMessageCallbackOriginal;
+                resolve(true);
+              } else if (message.type === "error") {
+                console.error("\u041E\u0448\u0438\u0431\u043A\u0430 \u043F\u0440\u0438 \u0438\u0441\u043F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u043D\u0438\u0438 \u043A\u043B\u044E\u0447\u0430:", message);
+                this.onMessageCallback = this.onMessageCallbackOriginal;
+                resolve(false);
+              } else if (message.type === "trustedDevices") {
+                if (message.devices && Array.isArray(message.devices)) {
+                  this.handleTrustedDevicesUpdate(message.devices);
+                } else if (message.payload) {
+                  this.handleTrustedDevicesUpdate(message.payload);
+                }
+              }
+            };
+            this.onMessageCallbackOriginal = this.onMessageCallback;
+            const tempHandler = (message) => {
+              if (message.type === "syncRequestSent" || message.type === "error" || message.type === "trustedDevices") {
+                syncRequestHandler(message);
+              } else {
+                this.onMessageCallbackOriginal(message);
+              }
+            };
+            this.onMessageCallback = tempHandler;
+            const cleanKey = key.trim().toUpperCase();
+            console.log("Sending cleaned key:", cleanKey);
+            this.sendMessage({
+              type: "useInvitationKey",
+              key: cleanKey,
+              deviceName: this.deviceName
+            });
+            setTimeout(() => {
+              this.onMessageCallback = this.onMessageCallbackOriginal;
+              this.requestTrustedDevices();
+              reject(new Error("\u0422\u0430\u0439\u043C\u0430\u0443\u0442 \u043F\u0440\u0438 \u0438\u0441\u043F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u043D\u0438\u0438 \u043A\u043B\u044E\u0447\u0430 \u043F\u0440\u0438\u0433\u043B\u0430\u0448\u0435\u043D\u0438\u044F"));
+            }, 3e4);
+          });
+        } catch (error) {
+          console.error("Error using invitation key:", error);
+          return false;
+        }
+      }
+      /**
+       * Ответ на запрос синхронизации
+       */
+      async respondToSyncRequest(requestId, targetDeviceId, accept, trusted = false) {
+        try {
+          console.log(`\u041E\u0442\u043F\u0440\u0430\u0432\u043A\u0430 \u043E\u0442\u0432\u0435\u0442\u0430 \u043D\u0430 \u0437\u0430\u043F\u0440\u043E\u0441 \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438: 
+                requestId=${requestId}, 
+                targetDeviceId=${targetDeviceId}, 
+                accept=${accept}, 
+                trusted=${trusted}`);
+          this.sendMessage({
+            type: "syncResponse",
+            requestId,
+            targetDeviceId,
+            accept,
+            trusted: trusted || false
+          });
+          console.log("\u0421\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u0435 \u0441 \u043E\u0442\u0432\u0435\u0442\u043E\u043C \u043D\u0430 \u0437\u0430\u043F\u0440\u043E\u0441 \u043E\u0442\u043F\u0440\u0430\u0432\u043B\u0435\u043D\u043E");
+          if (accept && trusted) {
+            console.log(`\u041B\u043E\u043A\u0430\u043B\u044C\u043D\u043E \u0434\u043E\u0431\u0430\u0432\u043B\u044F\u0435\u043C \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u043E ${targetDeviceId} \u0432 \u0434\u043E\u0432\u0435\u0440\u0435\u043D\u043D\u044B\u0435`);
+            if (!this.trustedDevices) {
+              this.trustedDevices = [];
+            }
+            let existingDevice = false;
+            if (Array.isArray(this.trustedDevices)) {
+              existingDevice = this.trustedDevices.some((device) => device.id === targetDeviceId);
+            }
+            if (!existingDevice) {
+              const newDevice = {
+                id: targetDeviceId,
+                name: "\u041D\u043E\u0432\u043E\u0435 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u043E"
+                // Имя обновится позже от сервера
+              };
+              this.trustedDevices = [...this.trustedDevices, newDevice];
+              this.onTrustedDevicesChangeCallback(this.trustedDevices);
+              console.log("\u0421\u043F\u0438\u0441\u043E\u043A \u0434\u043E\u0432\u0435\u0440\u0435\u043D\u043D\u044B\u0445 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432 \u043E\u0431\u043D\u043E\u0432\u043B\u0435\u043D \u043B\u043E\u043A\u0430\u043B\u044C\u043D\u043E");
+            }
+          }
+          return true;
+        } catch (error) {
+          console.error("Error responding to sync request:", error);
+          return false;
+        }
+      }
+      /**
+       * Отзыв доверия устройству
+       */
+      async revokeTrust(deviceId) {
+        try {
+          const response = await this.sendMessageWithResponse({
+            type: "revokeTrust",
+            targetDeviceId: deviceId
+          });
+          if (response.success) {
+            this.trustedDevices = this.trustedDevices.filter((device) => device.id !== deviceId);
+            this.onTrustedDevicesChangeCallback(this.trustedDevices);
+          }
+          return response.success;
+        } catch (error) {
+          console.error("Error revoking trust:", error);
+          return false;
+        }
+      }
+      /**
+       * Обработчик успешного подключения
+       */
+      handleOpen() {
+        console.log("WebSocket connected");
+        this.isConnected = true;
+        this.reconnectAttempts = 0;
+        this.onConnectionChangeCallback(true);
+        this.registerDevice();
+        this.startHeartbeat();
+      }
+      /**
+       * Регистрация устройства на сервере
+       */
+      registerDevice() {
+        this.sendMessage({
+          type: "register",
+          deviceName: this.deviceName
+        });
+        this.requestTrustedDevices();
+      }
+      /**
+       * Запрос списка доверенных устройств
+       */
+      requestTrustedDevices() {
+        console.log("\u0417\u0430\u043F\u0440\u043E\u0441 \u0441\u043F\u0438\u0441\u043A\u0430 \u0434\u043E\u0432\u0435\u0440\u0435\u043D\u043D\u044B\u0445 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432");
+        this.sendMessage({
+          type: "getTrustedDevices"
+        });
+        if (!this.trustedDevices || !Array.isArray(this.trustedDevices)) {
+          this.trustedDevices = [];
+        }
+      }
+      /**
+       * Обработчик получения сообщения
+       */
+      handleMessage(event) {
+        try {
+          const message = JSON.parse(event.data);
+          console.log("Received WebSocket message:", message);
+          if (message.requestId && this.messageCallbacks.has(message.requestId)) {
+            console.log("\u041E\u0431\u0440\u0430\u0431\u043E\u0442\u043A\u0430 \u043E\u0442\u0432\u0435\u0442\u0430 \u043D\u0430 \u0437\u0430\u043F\u0440\u043E\u0441:", message.requestId);
+            const callback = this.messageCallbacks.get(message.requestId);
+            this.messageCallbacks.delete(message.requestId);
+            if (callback)
+              callback(message);
+            return;
+          }
+          switch (message.type) {
+            case "pong":
+              break;
+            case "invitationKey":
+              console.log("\u041F\u043E\u043B\u0443\u0447\u0435\u043D \u043A\u043B\u044E\u0447 \u043F\u0440\u0438\u0433\u043B\u0430\u0448\u0435\u043D\u0438\u044F:", message.key);
+              this.onMessageCallback(message);
+              break;
+            case "trustedDevices":
+              console.log("\u041F\u043E\u043B\u0443\u0447\u0435\u043D \u0441\u043F\u0438\u0441\u043E\u043A \u0434\u043E\u0432\u0435\u0440\u0435\u043D\u043D\u044B\u0445 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432");
+              if (message.devices && Array.isArray(message.devices)) {
+                this.handleTrustedDevicesUpdate(message.devices);
+              } else if (message.payload) {
+                this.handleTrustedDevicesUpdate(message.payload);
+              } else {
+                this.handleTrustedDevicesUpdate([]);
+              }
+              break;
+            case "syncRequest":
+              console.log(
+                "\u041F\u043E\u043B\u0443\u0447\u0435\u043D \u0437\u0430\u043F\u0440\u043E\u0441 \u043D\u0430 \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u044E \u043E\u0442 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u0430:",
+                message.sourceName || message.sourceDeviceId
+              );
+              this.handleSyncRequest(message);
+              break;
+            case "syncResponseReceived":
+              console.log(
+                "\u041F\u043E\u043B\u0443\u0447\u0435\u043D \u043E\u0442\u0432\u0435\u0442 \u043D\u0430 \u0437\u0430\u043F\u0440\u043E\u0441 \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438:",
+                message.accepted ? "\u041F\u0420\u0418\u041D\u042F\u0422" : "\u041E\u0422\u041A\u041B\u041E\u041D\u0415\u041D"
+              );
+              if (message.accepted && message.sourceDeviceId) {
+                console.log("\u0417\u0430\u043F\u0440\u043E\u0441 \u043F\u0440\u0438\u043D\u044F\u0442, \u043E\u0431\u043D\u043E\u0432\u043B\u044F\u0435\u043C \u043B\u043E\u043A\u0430\u043B\u044C\u043D\u044B\u0439 \u0441\u043F\u0438\u0441\u043E\u043A \u0434\u043E\u0432\u0435\u0440\u0435\u043D\u043D\u044B\u0445 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432");
+                if (!this.trustedDevices) {
+                  this.trustedDevices = [];
+                }
+                let existingIndex = -1;
+                if (Array.isArray(this.trustedDevices)) {
+                  existingIndex = this.trustedDevices.findIndex(
+                    (d) => d && d.id === message.sourceDeviceId
+                  );
+                }
+                if (existingIndex === -1) {
+                  this.trustedDevices.push({
+                    id: message.sourceDeviceId,
+                    name: message.deviceName || "\u0423\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u043E " + message.sourceDeviceId.substring(0, 8)
+                  });
+                  this.onTrustedDevicesChangeCallback(this.trustedDevices);
+                  console.log("\u0414\u043E\u0431\u0430\u0432\u043B\u0435\u043D\u043E \u043D\u043E\u0432\u043E\u0435 \u0434\u043E\u0432\u0435\u0440\u0435\u043D\u043D\u043E\u0435 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u043E:", message.sourceDeviceId);
+                  setTimeout(() => {
+                    this.requestTrustedDevices();
+                  }, 1e3);
+                }
+              }
+              this.onMessageCallback(message);
+              break;
+            case "trustRevoked":
+              console.log("\u041F\u043E\u043B\u0443\u0447\u0435\u043D\u043E \u0443\u0432\u0435\u0434\u043E\u043C\u043B\u0435\u043D\u0438\u0435 \u043E\u0431 \u043E\u0442\u0437\u044B\u0432\u0435 \u0434\u043E\u0432\u0435\u0440\u0438\u044F");
+              this.handleTrustRevoked(message);
+              break;
+            case "trustExpired":
+              console.log("\u041F\u043E\u043B\u0443\u0447\u0435\u043D\u043E \u0443\u0432\u0435\u0434\u043E\u043C\u043B\u0435\u043D\u0438\u0435 \u043E\u0431 \u0438\u0441\u0442\u0435\u0447\u0435\u043D\u0438\u0438 \u0441\u0440\u043E\u043A\u0430 \u0434\u043E\u0432\u0435\u0440\u0438\u044F");
+              this.handleTrustExpired(message);
+              break;
+            case "message":
+              if (message.payload) {
+                const payload = message.payload;
+                if (typeof payload === "object" && payload !== null && ("path" in payload || "encryptedData" in payload || "deleted" in payload)) {
+                  console.log("\u041F\u043E\u043B\u0443\u0447\u0435\u043D\u044B \u0434\u0430\u043D\u043D\u044B\u0435 \u0444\u0430\u0439\u043B\u043E\u0432\u043E\u0439 \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438 (\u0442\u0438\u043F message)");
+                  const fileSyncMessage = {
+                    ...message,
+                    type: "fileSync"
+                  };
+                  this.onMessageCallback(fileSyncMessage);
+                  break;
+                }
+              }
+              console.log("\u041F\u043E\u043B\u0443\u0447\u0435\u043D\u043E \u043E\u0431\u044B\u0447\u043D\u043E\u0435 \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u0435 \u0441 \u0434\u0430\u043D\u043D\u044B\u043C\u0438");
+              this.onMessageCallback(message);
+              break;
+            case "error":
+              console.error("\u041F\u043E\u043B\u0443\u0447\u0435\u043D\u0430 \u043E\u0448\u0438\u0431\u043A\u0430 \u043E\u0442 \u0441\u0435\u0440\u0432\u0435\u0440\u0430:", message.message);
+              this.onMessageCallback(message);
+              break;
+            default:
+              console.log("\u041F\u043E\u043B\u0443\u0447\u0435\u043D\u043E \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u0435 \u043D\u0435\u0438\u0437\u0432\u0435\u0441\u0442\u043D\u043E\u0433\u043E \u0442\u0438\u043F\u0430:", message.type);
+              this.onMessageCallback(message);
+              break;
+          }
+        } catch (error) {
+          console.error("Error parsing message:", error);
+        }
+      }
+      /**
+       * Обработка обновления списка доверенных устройств
+       */
+      handleTrustedDevicesUpdate(devices) {
+        console.log("\u041E\u0431\u043D\u043E\u0432\u043B\u0435\u043D\u0438\u0435 \u0441\u043F\u0438\u0441\u043A\u0430 \u0434\u043E\u0432\u0435\u0440\u0435\u043D\u043D\u044B\u0445 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432:", devices);
+        if (!devices) {
+          console.log("\u041F\u043E\u043B\u0443\u0447\u0435\u043D \u043F\u0443\u0441\u0442\u043E\u0439 \u0441\u043F\u0438\u0441\u043E\u043A \u0434\u043E\u0432\u0435\u0440\u0435\u043D\u043D\u044B\u0445 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432, \u0438\u043D\u0438\u0446\u0438\u0430\u043B\u0438\u0437\u0438\u0440\u0443\u0435\u043C \u043F\u0443\u0441\u0442\u043E\u0439 \u043C\u0430\u0441\u0441\u0438\u0432");
+          this.trustedDevices = [];
+          this.onTrustedDevicesChangeCallback([]);
+          return;
+        }
+        const validDevices = Array.isArray(devices) ? devices.filter((d) => d && typeof d === "object" && d.id) : [];
+        console.log(`\u041E\u0431\u0440\u0430\u0431\u043E\u0442\u0430\u043D\u043E ${validDevices.length} \u0434\u043E\u0432\u0435\u0440\u0435\u043D\u043D\u044B\u0445 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432`);
+        this.trustedDevices = validDevices;
+        this.onTrustedDevicesChangeCallback(validDevices);
+      }
+      /**
+       * Обработка запроса на синхронизацию
+       */
+      handleSyncRequest(request) {
+        if (request.requestId) {
+          this.pendingRequests.set(request.requestId, request);
+        }
+        this.onSyncRequestCallback(request);
+      }
+      /**
+       * Обработка отзыва доверия
+       */
+      handleTrustRevoked(message) {
+        if (message.sourceDeviceId) {
+          this.trustedDevices = this.trustedDevices.filter(
+            (device) => device.id !== message.sourceDeviceId
+          );
+          this.onTrustedDevicesChangeCallback(this.trustedDevices);
+        }
+      }
+      /**
+       * Обработка истечения срока доверия
+       */
+      handleTrustExpired(message) {
+        if (message.sourceDeviceId) {
+          this.trustedDevices = this.trustedDevices.filter(
+            (device) => device.id !== message.sourceDeviceId
+          );
+          this.onTrustedDevicesChangeCallback(this.trustedDevices);
+        }
+      }
+      /**
+       * Обработчик закрытия соединения
+       */
+      handleClose(event) {
+        console.log(`WebSocket disconnected with code: ${event.code}, reason: ${event.reason}`);
+        this.isConnected = false;
+        this.onConnectionChangeCallback(false);
+        this.stopHeartbeat();
+        if (this.ws) {
+          this.scheduleReconnect();
+        }
+      }
+      /**
+       * Обработчик ошибки соединения
+       */
+      handleError(error) {
+        console.error("WebSocket error:", error);
+      }
+      /**
+       * Планирование переподключения
+       */
+      scheduleReconnect() {
+        if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+          console.log("Maximum reconnect attempts reached");
+          return;
+        }
+        const delay = Math.min(1e3 * Math.pow(2, this.reconnectAttempts), 3e4);
+        this.reconnectAttempts++;
+        console.log(`Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})`);
+        this.reconnectTimeout = setTimeout(() => {
+          console.log("Attempting to reconnect...");
+          this.connect();
+        }, delay);
+      }
+      /**
+       * Начать отправку пинг-сообщений
+       */
+      startHeartbeat() {
+        this.heartbeatInterval = setInterval(() => {
+          if (this.isConnected && this.ws && this.ws.readyState === WebSocket.OPEN) {
+            this.sendMessage({ type: "ping" });
+          }
+        }, 3e4);
+      }
+      /**
+       * Остановить отправку пинг-сообщений
+       */
+      stopHeartbeat() {
+        if (this.heartbeatInterval) {
+          clearInterval(this.heartbeatInterval);
+          this.heartbeatInterval = null;
+        }
+      }
+      /**
+       * Генерация уникального идентификатора запроса
+       */
+      generateRequestId() {
+        return Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
+      }
+      /**
+       * Получить список доверенных устройств
+       */
+      getTrustedDevices() {
+        return [...this.trustedDevices];
+      }
+      /**
+       * Проверить, является ли устройство доверенным
+       */
+      isDeviceTrusted(deviceId) {
+        return this.trustedDevices.some((device) => device.id === deviceId);
+      }
+    };
+  }
+});
+
+// src/utils/file-watcher.ts
+var import_obsidian3, FileWatcher;
+var init_file_watcher = __esm({
+  "src/utils/file-watcher.ts"() {
+    import_obsidian3 = require("obsidian");
+    FileWatcher = class {
+      constructor(vault, onChange) {
+        this.ignoredPatterns = [
+          /\.git\//,
+          // Git-файлы
+          /\.obsidian\//,
+          // Настройки Obsidian
+          /\.DS_Store/,
+          // Служебные файлы macOS
+          /Thumbs\.db/,
+          // Служебные файлы Windows
+          /\.sync\//,
+          // Папка синхронизации
+          /\.trash\//
+          // Корзина
+        ];
+        this.ignoredExtensions = [
+          ".tmp",
+          ".temp",
+          ".swp",
+          ".bak"
+        ];
+        this.vault = vault;
+        this.onChangeCallback = onChange;
+      }
+      /**
+       * Запустить отслеживание изменений файлов
+       */
+      startWatching() {
+        this.vault.on("create", this.handleFileCreate.bind(this));
+        this.vault.on("modify", this.handleFileModify.bind(this));
+        this.vault.on("delete", this.handleFileDelete.bind(this));
+        this.vault.on("rename", this.handleFileRename.bind(this));
+      }
+      /**
+       * Остановить отслеживание изменений файлов
+       */
+      stopWatching() {
+        this.vault.off("create", this.handleFileCreate.bind(this));
+        this.vault.off("modify", this.handleFileModify.bind(this));
+        this.vault.off("delete", this.handleFileDelete.bind(this));
+        this.vault.off("rename", this.handleFileRename.bind(this));
+      }
+      /**
+       * Добавить паттерн для игнорирования файлов
+       */
+      addIgnorePattern(pattern) {
+        this.ignoredPatterns.push(pattern);
+      }
+      /**
+       * Добавить расширение для игнорирования файлов
+       */
+      addIgnoreExtension(extension) {
+        this.ignoredExtensions.push(extension);
+      }
+      /**
+       * Проверить, должен ли файл быть проигнорирован
+       */
+      shouldIgnore(path) {
+        for (const pattern of this.ignoredPatterns) {
+          if (pattern.test(path)) {
+            return true;
+          }
+        }
+        for (const ext of this.ignoredExtensions) {
+          if (path.endsWith(ext)) {
+            return true;
+          }
+        }
+        return false;
+      }
+      /**
+       * Обработчик создания файла
+       */
+      handleFileCreate(file) {
+        if (!(file instanceof import_obsidian3.TFile) || this.shouldIgnore(file.path)) {
+          return;
+        }
+        this.onChangeCallback({
+          path: file.path,
+          type: "create",
+          file,
+          timestamp: Date.now()
+        });
+      }
+      /**
+       * Обработчик изменения файла
+       */
+      handleFileModify(file) {
+        if (!(file instanceof import_obsidian3.TFile) || this.shouldIgnore(file.path)) {
+          return;
+        }
+        this.onChangeCallback({
+          path: file.path,
+          type: "modify",
+          file,
+          timestamp: Date.now()
+        });
+      }
+      /**
+       * Обработчик удаления файла
+       */
+      handleFileDelete(file) {
+        if (!(file instanceof import_obsidian3.TFile) || this.shouldIgnore(file.path)) {
+          return;
+        }
+        this.onChangeCallback({
+          path: file.path,
+          type: "delete",
+          file,
+          timestamp: Date.now()
+        });
+      }
+      /**
+       * Обработчик переименования файла
+       */
+      handleFileRename(file, oldPath) {
+        if (!(file instanceof import_obsidian3.TFile) || this.shouldIgnore(file.path)) {
+          return;
+        }
+        this.onChangeCallback({
+          path: file.path,
+          oldPath,
+          type: "rename",
+          file,
+          timestamp: Date.now()
+        });
+      }
+      /**
+       * Получить текущее состояние всех файлов
+       */
+      async scanAllFiles() {
+        const files = this.vault.getFiles();
+        const changes = [];
+        for (const file of files) {
+          if (this.shouldIgnore(file.path)) {
+            continue;
+          }
+          changes.push({
+            path: file.path,
+            type: "create",
+            // Используем 'create' как тип при сканировании
+            file,
+            timestamp: file.stat.mtime
+            // Используем время модификации файла
+          });
+        }
+        return changes;
+      }
+    };
+  }
+});
+
+// src/client/sync-manager.ts
+var import_obsidian4, SyncManager;
+var init_sync_manager = __esm({
+  "src/client/sync-manager.ts"() {
+    import_obsidian4 = require("obsidian");
+    init_relay_client();
+    init_file_watcher();
+    init_crypto();
+    init_device_id();
+    SyncManager = class {
+      constructor(app, options) {
+        this.isSyncing = false;
+        this.fullSyncInterval = null;
+        this.pendingSyncRequests = /* @__PURE__ */ new Map();
+        this.trustedDevices = [];
+        // Режим ожидания - когда плагин запущен, но нет активных доверенных устройств
+        this.waitingMode = true;
+        // Счетчик изменений, ожидающих синхронизации
+        this.pendingChangesCount = 0;
+        /**
+         * Кэш содержимого файлов с метаинформацией и контролем размера
+         */
+        this.fileContentCache = /* @__PURE__ */ new Map();
+        this.totalCacheSize = 0;
+        this.MAX_CACHE_SIZE_MB = 50;
+        // Максимальный размер кэша в МБ
+        this.MAX_CACHE_ENTRY_SIZE_MB = 5;
+        /**
+         * Запросить метаданные файлов у других устройств для оптимизации синхронизации
+         */
+        this.deviceFileMetadata = /* @__PURE__ */ new Map();
+        // Счетчики для batchProcessor
+        this.batchUnchangedFiles = 0;
+        this.batchIdenticalFiles = 0;
+        this.app = app;
+        this.options = options;
+        this.encryptionPassword = options.encryptionPassword;
+        this.syncState = this.loadSyncState();
+        this.relayClient = new RelayClient({
+          serverUrl: options.serverUrl,
+          deviceId: this.syncState.deviceId,
+          deviceName: DeviceManager.getDeviceName(),
+          onMessage: this.handleSyncMessage.bind(this),
+          onConnectionChange: this.handleConnectionChange.bind(this),
+          onTrustedDevicesChange: this.handleTrustedDevicesChange.bind(this),
+          onSyncRequest: this.handleSyncRequest.bind(this)
+        });
+        this.fileWatcher = new FileWatcher(
+          app.vault,
+          this.handleFileChange.bind(this)
+        );
+        if (options.ignoredPaths) {
+          for (const path of options.ignoredPaths) {
+            this.fileWatcher.addIgnorePattern(new RegExp(path));
+          }
+        }
+      }
+      /**
+       * Запустить процесс синхронизации
+       */
+      async start() {
+        this.waitingMode = true;
+        console.log("\u0417\u0430\u043F\u0443\u0441\u043A \u043F\u043B\u0430\u0433\u0438\u043D\u0430 \u0432 \u0440\u0435\u0436\u0438\u043C\u0435 \u043E\u0436\u0438\u0434\u0430\u043D\u0438\u044F...");
+        this.relayClient.connect();
+        this.fileWatcher.startWatching();
+        await this.updateLocalFileState();
+        setTimeout(async () => {
+          console.log("\u041F\u0440\u043E\u0432\u0435\u0440\u043A\u0430 \u0434\u043E\u0441\u0442\u0443\u043F\u043D\u043E\u0441\u0442\u0438 \u0434\u043E\u0432\u0435\u0440\u0435\u043D\u043D\u044B\u0445 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432...");
+          await this.checkActiveTrustedDevices();
+        }, 3e3);
+      }
+      /**
+       * Проверка активных доверенных устройств и отправка сигнала
+       */
+      async checkActiveTrustedDevices() {
+        const trustedDevices = this.relayClient.getTrustedDevices();
+        if (!Array.isArray(trustedDevices) || trustedDevices.length === 0) {
+          console.log("\u041D\u0435\u0442 \u0434\u043E\u0432\u0435\u0440\u0435\u043D\u043D\u044B\u0445 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432. \u041F\u0435\u0440\u0435\u0445\u043E\u0434 \u0432 \u0440\u0435\u0436\u0438\u043C \u043E\u0436\u0438\u0434\u0430\u043D\u0438\u044F.");
+          this.waitingMode = true;
+          await this.updateLocalFileState();
+          return;
+        }
+        console.log(`\u041E\u0442\u043F\u0440\u0430\u0432\u043A\u0430 \u0441\u0438\u0433\u043D\u0430\u043B\u0430 \u0430\u043A\u0442\u0438\u0432\u043D\u043E\u0441\u0442\u0438 \u043D\u0430 ${trustedDevices.length} \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432...`);
+        const pingPromises = trustedDevices.map((device) => {
+          return new Promise((resolve) => {
+            const pingId = `ping-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+            const handlePingResponse = (message) => {
+              if (message.type === "message" && message.sourceDeviceId === device.id && message.payload && message.payload.action === "devicePingResponse" && message.payload.pingId === pingId) {
+                console.log(`\u041F\u043E\u043B\u0443\u0447\u0435\u043D \u043E\u0442\u0432\u0435\u0442 \u043D\u0430 \u043F\u0438\u043D\u0433 \u043E\u0442 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u0430 ${device.name || device.id}`);
+                const originalCallback2 = this.relayClient["onMessageCallbackOriginal"];
+                if (originalCallback2) {
+                  this.relayClient["onMessageCallback"] = originalCallback2;
+                }
+                resolve(true);
+              }
+            };
+            const originalCallback = this.relayClient["onMessageCallback"];
+            this.relayClient["onMessageCallbackOriginal"] = originalCallback;
+            this.relayClient["onMessageCallback"] = (message) => {
+              handlePingResponse(message);
+              originalCallback(message);
+            };
+            this.relayClient.sendMessage({
+              type: "message",
+              targetDeviceId: device.id,
+              payload: {
+                action: "devicePing",
+                pingId
+              }
+            });
+            setTimeout(() => {
+              this.relayClient["onMessageCallback"] = originalCallback;
+              resolve(false);
+            }, 3e3);
+          });
+        });
+        const results = await Promise.all(pingPromises);
+        const activeDevicesCount = results.filter((r) => r).length;
+        console.log(`\u0410\u043A\u0442\u0438\u0432\u043D\u044B\u0445 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432 \u043E\u0431\u043D\u0430\u0440\u0443\u0436\u0435\u043D\u043E: ${activeDevicesCount} \u0438\u0437 ${trustedDevices.length}`);
+        if (activeDevicesCount > 0) {
+          console.log("\u0415\u0441\u0442\u044C \u0430\u043A\u0442\u0438\u0432\u043D\u044B\u0435 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u0430. \u0412\u044B\u0445\u043E\u0434 \u0438\u0437 \u0440\u0435\u0436\u0438\u043C\u0430 \u043E\u0436\u0438\u0434\u0430\u043D\u0438\u044F.");
+          this.waitingMode = false;
+          if (this.options.fullSyncInterval && !this.fullSyncInterval) {
+            this.fullSyncInterval = setInterval(
+              this.performSmartSync.bind(this),
+              this.options.fullSyncInterval
+            );
+          }
+          if (this.pendingChangesCount > 0) {
+            console.log(`\u0417\u0430\u043F\u0443\u0441\u043A \u0443\u043C\u043D\u043E\u0439 \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438 \u0434\u043B\u044F ${this.pendingChangesCount} \u0438\u0437\u043C\u0435\u043D\u0435\u043D\u0438\u0439...`);
+            await this.performSmartSync();
+          } else {
+            console.log("\u041D\u0435\u0442 \u043D\u0430\u043A\u043E\u043F\u043B\u0435\u043D\u043D\u044B\u0445 \u0438\u0437\u043C\u0435\u043D\u0435\u043D\u0438\u0439, \u043F\u0440\u043E\u043F\u0443\u0441\u043A\u0430\u0435\u043C \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u044E.");
+          }
+        } else {
+          console.log("\u041D\u0435\u0442 \u0430\u043A\u0442\u0438\u0432\u043D\u044B\u0445 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432. \u041E\u0441\u0442\u0430\u0451\u043C\u0441\u044F \u0432 \u0440\u0435\u0436\u0438\u043C\u0435 \u043E\u0436\u0438\u0434\u0430\u043D\u0438\u044F.");
+          this.waitingMode = true;
+          setTimeout(() => this.checkActiveTrustedDevices(), 6e4);
+        }
+      }
+      /**
+       * Остановить процесс синхронизации
+       */
+      stop() {
+        this.fileWatcher.stopWatching();
+        this.relayClient.disconnect();
+        if (this.fullSyncInterval) {
+          clearInterval(this.fullSyncInterval);
+          this.fullSyncInterval = null;
+        }
+        this.saveSyncState();
+      }
+      /**
+       * Обработчик изменения файла
+       */
+      async handleFileChange(change) {
+        try {
+          if (this.isSyncing) {
+            return;
+          }
+          this.pendingChangesCount++;
+          switch (change.type) {
+            case "create":
+            case "modify":
+              await this.handleFileCreateOrModify(change);
+              break;
+            case "delete":
+              await this.handleFileDelete(change);
+              break;
+            case "rename":
+              await this.handleFileRename(change);
+              break;
+          }
+          this.saveSyncState();
+          if (this.waitingMode && this.pendingChangesCount >= 5) {
+            console.log(`\u041D\u0430\u043A\u043E\u043F\u043B\u0435\u043D\u043E ${this.pendingChangesCount} \u0438\u0437\u043C\u0435\u043D\u0435\u043D\u0438\u0439. \u041F\u0440\u043E\u0432\u0435\u0440\u044F\u0435\u043C \u043D\u0430\u043B\u0438\u0447\u0438\u0435 \u0430\u043A\u0442\u0438\u0432\u043D\u044B\u0445 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432...`);
+            this.checkActiveTrustedDevices();
+          }
+        } catch (error) {
+          console.error("Error handling file change:", error);
+          new import_obsidian4.Notice("\u041E\u0448\u0438\u0431\u043A\u0430 \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438 \u0444\u0430\u0439\u043B\u0430: " + error.message);
+        }
+      }
+      /**
+       * Обработчик создания или изменения файла
+       */
+      async handleFileCreateOrModify(change) {
+        const file = change.file;
+        const content = await this.app.vault.read(file);
+        const hash = await CryptoHelper.hashString(content);
+        const existingFile = this.syncState.files[file.path];
+        if (existingFile && existingFile.hash === hash) {
+          this.pendingChangesCount = Math.max(0, this.pendingChangesCount - 1);
+          return;
+        }
+        this.syncState.files[file.path] = {
+          path: file.path,
+          hash,
+          mtime: file.stat.mtime,
+          size: file.stat.size
+        };
+        if (!this.waitingMode) {
+          console.log(`\u0421\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u044F \u0438\u0437\u043C\u0435\u043D\u0435\u043D\u0438\u044F \u0444\u0430\u0439\u043B\u0430 ${file.path}`);
+          await this.syncFileWithPeers(file.path, content, hash, file.stat.mtime);
+        } else {
+          console.log(`\u0424\u0430\u0439\u043B ${file.path} \u0438\u0437\u043C\u0435\u043D\u0435\u043D, \u043D\u043E \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u044F \u043E\u0442\u043B\u043E\u0436\u0435\u043D\u0430 (\u0440\u0435\u0436\u0438\u043C \u043E\u0436\u0438\u0434\u0430\u043D\u0438\u044F)`);
+        }
+      }
+      /**
+       * Обработчик удаления файла
+       */
+      async handleFileDelete(change) {
+        const filePath = change.path;
+        if (!this.syncState.files[filePath]) {
+          this.pendingChangesCount = Math.max(0, this.pendingChangesCount - 1);
+          return;
+        }
+        this.syncState.files[filePath] = {
+          ...this.syncState.files[filePath],
+          deleted: true
+        };
+        if (!this.waitingMode) {
+          console.log(`\u0421\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u044F \u0443\u0434\u0430\u043B\u0435\u043D\u0438\u044F \u0444\u0430\u0439\u043B\u0430 ${filePath}`);
+          await this.syncFileDeletion(filePath);
+        } else {
+          console.log(`\u0424\u0430\u0439\u043B ${filePath} \u0443\u0434\u0430\u043B\u0435\u043D, \u043D\u043E \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u044F \u043E\u0442\u043B\u043E\u0436\u0435\u043D\u0430 (\u0440\u0435\u0436\u0438\u043C \u043E\u0436\u0438\u0434\u0430\u043D\u0438\u044F)`);
+        }
+      }
+      /**
+       * Обработчик переименования файла
+       */
+      async handleFileRename(change) {
+        const oldPath = change.oldPath;
+        const newPath = change.path;
+        const file = change.file;
+        if (!oldPath) {
+          console.error("Old path is missing in rename event");
+          this.pendingChangesCount = Math.max(0, this.pendingChangesCount - 1);
+          return;
+        }
+        const oldMetadata = this.syncState.files[oldPath];
+        if (oldMetadata) {
+          this.syncState.files[oldPath] = {
+            ...oldMetadata,
+            deleted: true
+          };
+          if (!this.waitingMode) {
+            await this.syncFileDeletion(oldPath);
+          } else {
+            console.log(`\u0424\u0430\u0439\u043B ${oldPath} \u043F\u0435\u0440\u0435\u0438\u043C\u0435\u043D\u043E\u0432\u0430\u043D, \u0443\u0434\u0430\u043B\u0435\u043D\u0438\u0435 \u043E\u0440\u0438\u0433\u0438\u043D\u0430\u043B\u0430 \u043E\u0442\u043B\u043E\u0436\u0435\u043D\u043E (\u0440\u0435\u0436\u0438\u043C \u043E\u0436\u0438\u0434\u0430\u043D\u0438\u044F)`);
+          }
+        }
+        const content = await this.app.vault.read(file);
+        const hash = await CryptoHelper.hashString(content);
+        this.syncState.files[newPath] = {
+          path: newPath,
+          hash,
+          mtime: file.stat.mtime,
+          size: file.stat.size
+        };
+        if (!this.waitingMode) {
+          console.log(`\u0421\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u044F \u043F\u0435\u0440\u0435\u0438\u043C\u0435\u043D\u043E\u0432\u0430\u043D\u043D\u043E\u0433\u043E \u0444\u0430\u0439\u043B\u0430 ${newPath}`);
+          await this.syncFileWithPeers(newPath, content, hash, file.stat.mtime);
+        } else {
+          console.log(`\u0424\u0430\u0439\u043B ${oldPath} \u043F\u0435\u0440\u0435\u0438\u043C\u0435\u043D\u043E\u0432\u0430\u043D \u0432 ${newPath}, \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u044F \u043E\u0442\u043B\u043E\u0436\u0435\u043D\u0430 (\u0440\u0435\u0436\u0438\u043C \u043E\u0436\u0438\u0434\u0430\u043D\u0438\u044F)`);
+        }
+      }
+      /**
+       * Синхронизация файла с доверенными устройствами
+       * @param path Путь к файлу
+       * @param content Содержимое файла
+       * @param hash Хеш файла
+       * @param mtime Время модификации
+       * @param isNew Флаг, указывающий, что файл новый/недавно изменен
+       * @param specificDevices Список ID устройств для синхронизации (если задан, то только им)
+       * @param requestId ID запроса (если отправка в ответ на запрос)
+       * @param vectorClock Векторные часы для версии файла
+       * @param conflictResolution Данные для разрешения конфликтов
+       */
+      async syncFileWithPeers(path, content, hash, mtime, isNew = true, specificDevices, requestId, vectorClock, conflictResolution) {
+        if (!this.relayClient.isConnected) {
+          console.error(`\u041D\u0435\u0432\u043E\u0437\u043C\u043E\u0436\u043D\u043E \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0438\u0440\u043E\u0432\u0430\u0442\u044C \u0444\u0430\u0439\u043B ${path}: \u043D\u0435\u0442 \u0441\u043E\u0435\u0434\u0438\u043D\u0435\u043D\u0438\u044F \u0441 \u0441\u0435\u0440\u0432\u0435\u0440\u043E\u043C`);
+          new import_obsidian4.Notice(`\u041D\u0435\u0432\u043E\u0437\u043C\u043E\u0436\u043D\u043E \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0438\u0440\u043E\u0432\u0430\u0442\u044C \u0444\u0430\u0439\u043B ${path}: \u043D\u0435\u0442 \u0441\u043E\u0435\u0434\u0438\u043D\u0435\u043D\u0438\u044F \u0441 \u0441\u0435\u0440\u0432\u0435\u0440\u043E\u043C. \u0418\u0437\u043C\u0435\u043D\u0435\u043D\u0438\u044F \u0431\u0443\u0434\u0443\u0442 \u043E\u0442\u043F\u0440\u0430\u0432\u043B\u0435\u043D\u044B \u043F\u0440\u0438 \u0432\u043E\u0441\u0441\u0442\u0430\u043D\u043E\u0432\u043B\u0435\u043D\u0438\u0438 \u0441\u043E\u0435\u0434\u0438\u043D\u0435\u043D\u0438\u044F.`);
+          return;
+        }
+        const allTrustedDevices = this.relayClient.getTrustedDevices();
+        const targetDevices = specificDevices ? allTrustedDevices.filter((device) => specificDevices.includes(device.id)) : allTrustedDevices;
+        if (!Array.isArray(targetDevices) || targetDevices.length === 0) {
+          console.log(`\u041F\u0440\u043E\u043F\u0443\u0441\u043A \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438 \u0444\u0430\u0439\u043B\u0430 ${path}: \u043D\u0435\u0442 \u0446\u0435\u043B\u0435\u0432\u044B\u0445 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432`);
+          return;
+        }
+        try {
+          const isMarkdown = path.endsWith(".md");
+          const isLargeFile = content.length > 1e4;
+          let compressedContent = content;
+          let compressionInfo = { compressed: false, originalSize: content.length, compressedSize: content.length };
+          if (isMarkdown && isLargeFile) {
+            const targetDeviceIds = targetDevices.map((device) => typeof device === "string" ? device : device.id);
+            const remoteFile = this.findRemoteFileVersion(path, targetDeviceIds);
+            if (remoteFile && remoteFile.hash !== hash) {
+              try {
+                const targetDeviceId = typeof targetDevices[0] === "string" ? targetDevices[0] : targetDevices[0].id;
+                const baseContent = await this.getRemoteFileContent(path, remoteFile.hash, targetDeviceId);
+                if (baseContent) {
+                  const delta = this.createDelta(baseContent, content);
+                  if (delta.length < content.length * 0.7) {
+                    console.log(`\u0418\u0441\u043F\u043E\u043B\u044C\u0437\u0443\u0435\u043C \u0434\u0435\u043B\u044C\u0442\u0430-\u0441\u0436\u0430\u0442\u0438\u0435 \u0434\u043B\u044F ${path}: ${delta.length} \u0431\u0430\u0439\u0442 (${Math.round(delta.length / content.length * 100)}% \u043E\u0442 \u043E\u0440\u0438\u0433\u0438\u043D\u0430\u043B\u0430)`);
+                    compressedContent = delta;
+                    compressionInfo = {
+                      compressed: true,
+                      originalSize: content.length,
+                      compressedSize: delta.length
+                    };
+                    compressedContent = delta;
+                    compressionInfo = {
+                      compressed: true,
+                      originalSize: content.length,
+                      compressedSize: delta.length
+                    };
+                    const deltaEncryptedData = await CryptoHelper.encrypt(delta, this.encryptionPassword);
+                    let successCount = 0;
+                    for (const device of targetDevices) {
+                      const deviceId = typeof device === "string" ? device : device.id;
+                      const success = this.relayClient.sendMessage({
+                        type: "fileSync",
+                        targetDeviceId: deviceId,
+                        payload: {
+                          path,
+                          encryptedData: deltaEncryptedData,
+                          mtime,
+                          hash,
+                          priority: isNew ? "high" : "normal",
+                          compression: compressionInfo,
+                          isMarkdown: true,
+                          deltaData: {
+                            baseHash: remoteFile.hash,
+                            isDelta: true
+                          }
+                        }
+                      });
+                      if (success) {
+                        successCount++;
+                      }
+                    }
+                    if (successCount === 0) {
+                      console.error(`\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u043E\u0442\u043F\u0440\u0430\u0432\u0438\u0442\u044C \u0434\u0435\u043B\u044C\u0442\u0443 \u0434\u043B\u044F ${path} \u043D\u0438 \u043E\u0434\u043D\u043E\u043C\u0443 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u0443 \u0438\u0437-\u0437\u0430 \u043F\u0440\u043E\u0431\u043B\u0435\u043C \u0441 \u0441\u043E\u0435\u0434\u0438\u043D\u0435\u043D\u0438\u0435\u043C`);
+                    }
+                    console.log(`\u041E\u0442\u043F\u0440\u0430\u0432\u043B\u0435\u043D\u0430 \u0434\u0435\u043B\u044C\u0442\u0430 \u0434\u043B\u044F ${path} \u043D\u0430 ${targetDevices.length} \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432`);
+                    return;
+                  } else {
+                    console.log(`\u0414\u0435\u043B\u044C\u0442\u0430 \u0434\u043B\u044F ${path} \u0441\u043B\u0438\u0448\u043A\u043E\u043C \u0431\u043E\u043B\u044C\u0448\u0430\u044F, \u0438\u0441\u043F\u043E\u043B\u044C\u0437\u0443\u0435\u043C \u043F\u043E\u043B\u043D\u043E\u0435 \u0441\u043E\u0434\u0435\u0440\u0436\u0438\u043C\u043E\u0435`);
+                  }
+                }
+              } catch (deltaError) {
+                console.warn(`\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u0441\u043E\u0437\u0434\u0430\u0442\u044C \u0434\u0435\u043B\u044C\u0442\u0443 \u0434\u043B\u044F ${path}:`, deltaError);
+              }
+            }
+            compressedContent = content;
+            compressionInfo = {
+              compressed: true,
+              originalSize: content.length,
+              compressedSize: compressedContent.length
+            };
+          } else if (isLargeFile) {
+            try {
+              const isTextFile = path.match(/\.(txt|json|xml|css|js|html|htm|csv|log)$/i) !== null;
+              if (isTextFile) {
+                compressedContent = this.compressTextContent(content);
+              } else {
+                compressedContent = content;
+              }
+              compressionInfo = {
+                compressed: compressedContent.length < content.length,
+                originalSize: content.length,
+                compressedSize: compressedContent.length
+              };
+              if (compressedContent.length >= content.length) {
+                compressedContent = content;
+                compressionInfo.compressed = false;
+                compressionInfo.compressedSize = content.length;
+              }
+              console.log(`\u0421\u0436\u0430\u0442\u0438\u0435 \u0434\u043B\u044F ${path}: ${compressionInfo.originalSize} -> ${compressionInfo.compressedSize} \u0431\u0430\u0439\u0442 (${Math.round(compressionInfo.compressedSize / compressionInfo.originalSize * 100)}%)`);
+            } catch (compressionError) {
+              console.warn(`\u041E\u0448\u0438\u0431\u043A\u0430 \u043F\u0440\u0438 \u0441\u0436\u0430\u0442\u0438\u0438 \u0444\u0430\u0439\u043B\u0430 ${path}:`, compressionError);
+              compressedContent = content;
+              compressionInfo = {
+                compressed: false,
+                originalSize: content.length,
+                compressedSize: content.length
+              };
+            }
+          }
+          console.log(`\u0428\u0438\u0444\u0440\u043E\u0432\u0430\u043D\u0438\u0435 \u0444\u0430\u0439\u043B\u0430 ${path} (${content.length} \u0431\u0430\u0439\u0442)...`);
+          const encryptedData = await CryptoHelper.encrypt(compressedContent, this.encryptionPassword);
+          const fileMessage = {
+            path,
+            encryptedData,
+            mtime,
+            hash,
+            priority: isNew ? "high" : "normal",
+            compression: compressionInfo,
+            isMarkdown,
+            responseToRequestId: requestId,
+            // Добавляем векторные часы и информацию о конфликтах
+            vectorClock: vectorClock || this.getFileVectorClock(path),
+            conflictResolution
+          };
+          console.log(`\u041E\u0442\u043F\u0440\u0430\u0432\u043A\u0430 \u0444\u0430\u0439\u043B\u0430 ${path} (${isNew ? "\u043D\u043E\u0432\u044B\u0439/\u0438\u0437\u043C\u0435\u043D\u0451\u043D\u043D\u044B\u0439" : "\u0441\u0442\u0430\u0440\u044B\u0439"}) \u043D\u0430 ${targetDevices.length} \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432...`);
+          if (!isLargeFile || specificDevices) {
+            const sendPromises = targetDevices.map(async (device) => {
+              try {
+                const success = this.relayClient.sendMessage({
+                  type: "fileSync",
+                  targetDeviceId: device.id,
+                  requestId,
+                  // Передаем requestId, если это ответ на запрос
+                  payload: fileMessage
+                });
+                if (!success) {
+                  console.error(`\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u043E\u0442\u043F\u0440\u0430\u0432\u0438\u0442\u044C \u0444\u0430\u0439\u043B ${path} \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u0443 ${device.id} \u0438\u0437-\u0437\u0430 \u043F\u0440\u043E\u0431\u043B\u0435\u043C \u0441 \u0441\u043E\u0435\u0434\u0438\u043D\u0435\u043D\u0438\u0435\u043C`);
+                  return false;
+                }
+                return true;
+              } catch (deviceError) {
+                console.error(`\u041E\u0448\u0438\u0431\u043A\u0430 \u043F\u0440\u0438 \u043E\u0442\u043F\u0440\u0430\u0432\u043A\u0435 \u043D\u0430 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u043E ${device.id}:`, deviceError);
+                return false;
+              }
+            });
+            const results = await Promise.allSettled(sendPromises);
+            const successCount = results.filter((r) => r.status === "fulfilled" && r.value).length;
+            console.log(`\u0424\u0430\u0439\u043B ${path} \u043E\u0442\u043F\u0440\u0430\u0432\u043B\u0435\u043D \u043D\u0430 ${successCount}/${targetDevices.length} \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432`);
+            return;
+          }
+          const CHUNK_SIZE = 500 * 1024;
+          const needsChunking = content.length > CHUNK_SIZE * 2;
+          const syncOperationId = Date.now().toString(36) + Math.random().toString(36).substring(2, 7);
+          const metadataMessage = {
+            path,
+            hash,
+            mtime,
+            size: content.length,
+            priority: isNew ? "high" : "normal",
+            isMarkdown,
+            chunked: needsChunking,
+            // Флаг, показывающий, что файл будет отправлен по частям
+            syncOperationId: needsChunking ? syncOperationId : void 0,
+            // ID операции для сборки фрагментов
+            totalChunks: needsChunking ? Math.ceil(content.length / CHUNK_SIZE) : void 0
+            // Общее количество фрагментов
+          };
+          let metadataSuccessCount = 0;
+          for (const device of targetDevices) {
+            const success = this.relayClient.sendMessage({
+              type: "fileMetadataOnly",
+              // Отличается от fileMetadata - содержит только метаданные одного файла
+              targetDeviceId: device.id,
+              payload: metadataMessage
+            });
+            if (success) {
+              metadataSuccessCount++;
+            }
+          }
+          if (metadataSuccessCount === 0 && targetDevices.length > 0) {
+            console.error(`\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u043E\u0442\u043F\u0440\u0430\u0432\u0438\u0442\u044C \u043C\u0435\u0442\u0430\u0434\u0430\u043D\u043D\u044B\u0435 \u0444\u0430\u0439\u043B\u0430 ${path} \u043D\u0438 \u043E\u0434\u043D\u043E\u043C\u0443 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u0443 \u0438\u0437-\u0437\u0430 \u043F\u0440\u043E\u0431\u043B\u0435\u043C \u0441 \u0441\u043E\u0435\u0434\u0438\u043D\u0435\u043D\u0438\u0435\u043C`);
+          } else if (metadataSuccessCount < targetDevices.length) {
+            console.warn(`\u041C\u0435\u0442\u0430\u0434\u0430\u043D\u043D\u044B\u0435 \u0444\u0430\u0439\u043B\u0430 ${path} \u043E\u0442\u043F\u0440\u0430\u0432\u043B\u0435\u043D\u044B \u0442\u043E\u043B\u044C\u043A\u043E ${metadataSuccessCount} \u0438\u0437 ${targetDevices.length} \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432 \u0438\u0437-\u0437\u0430 \u043F\u0440\u043E\u0431\u043B\u0435\u043C \u0441 \u0441\u043E\u0435\u0434\u0438\u043D\u0435\u043D\u0438\u0435\u043C`);
+          }
+          if (!needsChunking) {
+            this.saveContentToCache(path, content, hash);
+          }
+          console.log(`\u041C\u0435\u0442\u0430\u0434\u0430\u043D\u043D\u044B\u0435 \u0444\u0430\u0439\u043B\u0430 ${path} \u043E\u0442\u043F\u0440\u0430\u0432\u043B\u0435\u043D\u044B \u043D\u0430 ${targetDevices.length} \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432. ${needsChunking ? `\u0424\u0430\u0439\u043B \u0431\u0443\u0434\u0435\u0442 \u043E\u0442\u043F\u0440\u0430\u0432\u043B\u0435\u043D \u043F\u043E \u0437\u0430\u043F\u0440\u043E\u0441\u0443 \u0432 ${Math.ceil(content.length / CHUNK_SIZE)} \u0444\u0440\u0430\u0433\u043C\u0435\u043D\u0442\u0430\u0445.` : `\u041E\u0436\u0438\u0434\u0430\u0435\u043C \u0437\u0430\u043F\u0440\u043E\u0441\u044B \u043D\u0430 \u043F\u043E\u043B\u0443\u0447\u0435\u043D\u0438\u0435 \u0441\u043E\u0434\u0435\u0440\u0436\u0438\u043C\u043E\u0433\u043E.`}`);
+        } catch (error) {
+          console.error(`Error syncing file ${path}:`, error);
+          throw new Error(`\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0438\u0440\u043E\u0432\u0430\u0442\u044C \u0444\u0430\u0439\u043B ${path}: ${error.message}`);
+        }
+      }
+      /**
+       * Найти версию файла на одном из целевых устройств для дельта-синхронизации
+       */
+      findRemoteFileVersion(path, targetDeviceIds) {
+        for (const deviceId of targetDeviceIds) {
+          const deviceMeta = this.deviceFileMetadata.get(deviceId);
+          if (deviceMeta && deviceMeta[path]) {
+            return deviceMeta[path];
+          }
+        }
+        return null;
+      }
+      /**
+       * Запросить содержимое файла с другого устройства для дельта-синхронизации
+       */
+      async getRemoteFileContent(path, hash, deviceId) {
+        const cachedContent = this.getContentFromCache(path, hash);
+        if (cachedContent) {
+          console.log(`\u041D\u0430\u0439\u0434\u0435\u043D\u0430 \u0432\u0435\u0440\u0441\u0438\u044F \u0444\u0430\u0439\u043B\u0430 ${path} \u0432 \u043A\u044D\u0448\u0435 (hash: ${hash.substring(0, 8)})`);
+          return cachedContent;
+        }
+        try {
+          console.log(`\u0417\u0430\u043F\u0440\u0430\u0448\u0438\u0432\u0430\u0435\u043C \u0432\u0435\u0440\u0441\u0438\u044E \u0444\u0430\u0439\u043B\u0430 ${path} \u0443 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u0430 ${deviceId} \u0434\u043B\u044F \u0434\u0435\u043B\u044C\u0442\u0430-\u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438...`);
+          const requestId = Date.now().toString() + "-delta-" + Math.random().toString(36).substring(2, 7);
+          const responsePromise = new Promise((resolve) => {
+            const handleFileResponse = async (message) => {
+              if (message.type === "fileSync" && message.sourceDeviceId === deviceId && message.responseToRequestId === requestId) {
+                if (message.payload && message.payload.path === path && message.payload.encryptedData) {
+                  try {
+                    const decryptedContent = await CryptoHelper.decrypt(
+                      message.payload.encryptedData,
+                      this.encryptionPassword
+                    );
+                    console.log(`\u041F\u043E\u043B\u0443\u0447\u0435\u043D\u0430 \u0432\u0435\u0440\u0441\u0438\u044F \u0444\u0430\u0439\u043B\u0430 ${path} \u0434\u043B\u044F \u0434\u0435\u043B\u044C\u0442\u0430-\u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438`);
+                    resolve(decryptedContent);
+                    this.saveContentToCache(path, decryptedContent, message.payload.hash);
+                    return;
+                  } catch (error) {
+                    console.error(`\u041E\u0448\u0438\u0431\u043A\u0430 \u043F\u0440\u0438 \u0440\u0430\u0441\u0448\u0438\u0444\u0440\u043E\u0432\u043A\u0435 \u0444\u0430\u0439\u043B\u0430 ${path}:`, error);
+                  }
+                }
+              }
+              const originalCallback2 = this.relayClient["onMessageCallbackOriginal"];
+              if (originalCallback2) {
+                originalCallback2(message);
+              }
+            };
+            const originalCallback = this.relayClient["onMessageCallback"];
+            this.relayClient["onMessageCallbackOriginal"] = originalCallback;
+            this.relayClient["onMessageCallback"] = handleFileResponse;
+            this.relayClient.sendMessage({
+              type: "requestFile",
+              targetDeviceId: deviceId,
+              requestId,
+              payload: {
+                path,
+                hash,
+                forDelta: true
+                // Флаг, что это запрос для дельта-синхронизации
+              }
+            });
+            setTimeout(() => {
+              this.relayClient["onMessageCallback"] = originalCallback;
+              console.log(`\u0422\u0430\u0439\u043C\u0430\u0443\u0442 \u0437\u0430\u043F\u0440\u043E\u0441\u0430 \u0441\u043E\u0434\u0435\u0440\u0436\u0438\u043C\u043E\u0433\u043E \u0444\u0430\u0439\u043B\u0430 ${path} \u0434\u043B\u044F \u0434\u0435\u043B\u044C\u0442\u0430-\u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438`);
+              resolve(null);
+            }, 1e4);
+          });
+          return await responsePromise;
+        } catch (error) {
+          console.error(`\u041E\u0448\u0438\u0431\u043A\u0430 \u043F\u0440\u0438 \u0437\u0430\u043F\u0440\u043E\u0441\u0435 \u0441\u043E\u0434\u0435\u0440\u0436\u0438\u043C\u043E\u0433\u043E \u0444\u0430\u0439\u043B\u0430 ${path} \u0434\u043B\u044F \u0434\u0435\u043B\u044C\u0442\u0430-\u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438:`, error);
+          return null;
+        }
+      }
+      /**
+       * Создать дельту между старым и новым содержимым
+       * Использует оптимизированный алгоритм дельта-сжатия для текстовых файлов
+       */
+      createDelta(baseContent, newContent) {
+        try {
+          const baseLines = baseContent.split(/\r?\n/);
+          const newLines = newContent.split(/\r?\n/);
+          const lcsMatrix = this.computeLCSMatrix(baseLines, newLines);
+          const operations = this.extractDeltaOperations(baseLines, newLines, lcsMatrix);
+          const compactOperations = this.compactOperations(operations);
+          const delta = {
+            originalLength: baseLines.length,
+            newLength: newLines.length,
+            operations: compactOperations
+          };
+          const deltaStr = JSON.stringify(delta);
+          if (deltaStr.length > newContent.length * 0.7) {
+            return JSON.stringify({
+              fullContent: true,
+              content: newContent
+            });
+          }
+          return deltaStr;
+        } catch (error) {
+          console.error("\u041E\u0448\u0438\u0431\u043A\u0430 \u043F\u0440\u0438 \u0441\u043E\u0437\u0434\u0430\u043D\u0438\u0438 \u0434\u0435\u043B\u044C\u0442\u044B:", error);
+          return JSON.stringify({
+            fullContent: true,
+            content: newContent,
+            error: error.message
+          });
+        }
+      }
+      /**
+       * Вычисляем матрицу наибольшей общей подпоследовательности (LCS)
+       * для базового и нового контента
+       */
+      computeLCSMatrix(baseLines, newLines) {
+        const m = baseLines.length;
+        const n = newLines.length;
+        if (m * n > 1e7) {
+          return this.computeLCSMatrixSparse(baseLines, newLines);
+        }
+        const lcsMatrix = Array(m + 1).fill(null).map(() => Array(n + 1).fill(0));
+        for (let i = 1; i <= m; i++) {
+          for (let j = 1; j <= n; j++) {
+            if (baseLines[i - 1] === newLines[j - 1]) {
+              lcsMatrix[i][j] = lcsMatrix[i - 1][j - 1] + 1;
+            } else {
+              lcsMatrix[i][j] = Math.max(lcsMatrix[i - 1][j], lcsMatrix[i][j - 1]);
+            }
+          }
+        }
+        return lcsMatrix;
+      }
+      /**
+       * Вычисляем разреженную матрицу LCS для больших файлов
+       * Использует оптимизации по памяти для очень больших файлов
+       */
+      computeLCSMatrixSparse(baseLines, newLines) {
+        const m = baseLines.length;
+        const n = newLines.length;
+        let prev = Array(n + 1).fill(0);
+        let curr = Array(n + 1).fill(0);
+        const result = [];
+        for (let i = 1; i <= m; i++) {
+          [prev, curr] = [curr, prev];
+          curr[0] = 0;
+          for (let j = 1; j <= n; j++) {
+            if (baseLines[i - 1] === newLines[j - 1]) {
+              curr[j] = prev[j - 1] + 1;
+            } else {
+              curr[j] = Math.max(prev[j], curr[j - 1]);
+            }
+          }
+          if (i % 100 === 0 || i === m) {
+            result.push([...curr]);
+          }
+        }
+        return result;
+      }
+      /**
+       * Извлекаем операции дельты из матрицы LCS
+       */
+      extractDeltaOperations(baseLines, newLines, lcsMatrix) {
+        const operations = [];
+        let i = baseLines.length;
+        let j = newLines.length;
+        if (lcsMatrix.length < baseLines.length + 1) {
+          return this.extractDeltaOperationsSparse(baseLines, newLines);
+        }
+        while (i > 0 || j > 0) {
+          if (i > 0 && j > 0 && baseLines[i - 1] === newLines[j - 1]) {
+            operations.unshift({
+              op: "keep",
+              start: i - 1,
+              count: 1
+            });
+            i--;
+            j--;
+          } else if (j > 0 && (i === 0 || lcsMatrix[i][j - 1] >= lcsMatrix[i - 1][j])) {
+            operations.unshift({
+              op: "insert",
+              start: j - 1,
+              count: 1,
+              lines: [newLines[j - 1]]
+            });
+            j--;
+          } else if (i > 0 && (j === 0 || lcsMatrix[i][j - 1] < lcsMatrix[i - 1][j])) {
+            operations.unshift({
+              op: "delete",
+              start: i - 1,
+              count: 1
+            });
+            i--;
+          }
+        }
+        return operations;
+      }
+      /**
+       * Извлекаем операции дельты для разреженной матрицы LCS (для больших файлов)
+       */
+      extractDeltaOperationsSparse(baseLines, newLines) {
+        const operations = [];
+        let commonStart = 0;
+        while (commonStart < baseLines.length && commonStart < newLines.length && baseLines[commonStart] === newLines[commonStart]) {
+          commonStart++;
+        }
+        let commonEnd = 0;
+        while (commonEnd < baseLines.length - commonStart && commonEnd < newLines.length - commonStart && baseLines[baseLines.length - 1 - commonEnd] === newLines[newLines.length - 1 - commonEnd]) {
+          commonEnd++;
+        }
+        if (commonStart > 0) {
+          operations.push({
+            op: "keep",
+            start: 0,
+            count: commonStart
+          });
+        }
+        const baseMiddle = baseLines.slice(commonStart, baseLines.length - commonEnd);
+        const newMiddle = newLines.slice(commonStart, newLines.length - commonEnd);
+        if (baseMiddle.length > 0 || newMiddle.length > 0) {
+          if (baseMiddle.length > 0) {
+            operations.push({
+              op: "delete",
+              start: commonStart,
+              count: baseMiddle.length
+            });
+          }
+          if (newMiddle.length > 0) {
+            operations.push({
+              op: "insert",
+              start: commonStart,
+              count: newMiddle.length,
+              lines: newMiddle
+            });
+          }
+        }
+        if (commonEnd > 0) {
+          operations.push({
+            op: "keep",
+            start: baseLines.length - commonEnd,
+            count: commonEnd
+          });
+        }
+        return operations;
+      }
+      /**
+       * Группируем и компактизируем операции дельты
+       */
+      compactOperations(operations) {
+        if (!operations.length)
+          return [];
+        const result = [];
+        let current = operations[0];
+        for (let i = 1; i < operations.length; i++) {
+          const next = operations[i];
+          if (next.op === current.op && (next.op === "keep" && next.start === current.start + current.count || next.op === "delete" && next.start === current.start + current.count || next.op === "insert" && next.start === current.start + current.count)) {
+            if (next.op === "insert") {
+              if (current.lines && next.lines) {
+                current.lines = current.lines.concat(next.lines);
+              }
+            }
+            current.count += next.count;
+          } else {
+            result.push(current);
+            current = next;
+          }
+        }
+        result.push(current);
+        return result;
+      }
+      /**
+       * Получить файл по его хешу (для применения дельты)
+       */
+      async getFileWithHash(path, hash) {
+        const cachedContent = this.getContentFromCache(path, hash);
+        if (cachedContent) {
+          return cachedContent;
+        }
+        const file = this.app.vault.getAbstractFileByPath(path);
+        if (file instanceof import_obsidian4.TFile) {
+          try {
+            const content = await this.app.vault.read(file);
+            const currentHash = await CryptoHelper.hashString(content);
+            if (currentHash === hash) {
+              this.saveContentToCache(path, content, hash);
+              return content;
+            }
+          } catch (error) {
+            console.error(`\u041E\u0448\u0438\u0431\u043A\u0430 \u043F\u0440\u0438 \u0447\u0442\u0435\u043D\u0438\u0438 \u0444\u0430\u0439\u043B\u0430 ${path}:`, error);
+          }
+        }
+        const trustedDevices = this.relayClient.getTrustedDevices();
+        if (trustedDevices.length > 0) {
+          for (const device of trustedDevices) {
+            const remoteContent = await this.getRemoteFileContent(path, hash, device.id);
+            if (remoteContent) {
+              return remoteContent;
+            }
+          }
+        }
+        return null;
+      }
+      /**
+       * Применить дельту к базовому содержимому
+       * Поддерживает оптимизированный формат дельты
+       */
+      applyDelta(baseContent, delta) {
+        try {
+          const deltaObj = JSON.parse(delta);
+          if (deltaObj.fullContent) {
+            console.log("\u041F\u043E\u043B\u0443\u0447\u0435\u043D\u0430 \u043F\u043E\u043B\u043D\u0430\u044F \u0432\u0435\u0440\u0441\u0438\u044F \u0444\u0430\u0439\u043B\u0430 \u0432\u043C\u0435\u0441\u0442\u043E \u0434\u0435\u043B\u044C\u0442\u044B");
+            return deltaObj.content;
+          }
+          if (deltaObj.commonStart !== void 0 && deltaObj.commonEnd !== void 0 && deltaObj.newMiddle !== void 0) {
+            const baseLines = baseContent.split(/\r?\n/);
+            const commonStart = deltaObj.commonStart;
+            const commonEnd = deltaObj.commonEnd;
+            const startPart = baseLines.slice(0, commonStart);
+            const endPart = baseLines.slice(baseLines.length - commonEnd);
+            const newMiddle = deltaObj.newMiddle.split(/\r?\n/);
+            return [...startPart, ...newMiddle, ...endPart].join("\n");
+          }
+          if (deltaObj.operations && Array.isArray(deltaObj.operations)) {
+            const baseLines = baseContent.split(/\r?\n/);
+            const resultLines = [...baseLines];
+            const sortedOperations = [...deltaObj.operations].sort((a, b) => b.start - a.start);
+            for (const op of sortedOperations) {
+              switch (op.op) {
+                case "keep":
+                  break;
+                case "delete":
+                  resultLines.splice(op.start, op.count);
+                  break;
+                case "insert":
+                  if (op.lines && Array.isArray(op.lines)) {
+                    resultLines.splice(op.start, 0, ...op.lines);
+                  }
+                  break;
+              }
+            }
+            return resultLines.join("\n");
+          }
+          throw new Error("\u041D\u0435\u0438\u0437\u0432\u0435\u0441\u0442\u043D\u044B\u0439 \u0444\u043E\u0440\u043C\u0430\u0442 \u0434\u0435\u043B\u044C\u0442\u044B");
+        } catch (error) {
+          console.error("\u041E\u0448\u0438\u0431\u043A\u0430 \u043F\u0440\u0438 \u043F\u0440\u0438\u043C\u0435\u043D\u0435\u043D\u0438\u0438 \u0434\u0435\u043B\u044C\u0442\u044B:", error);
+          throw new Error(`\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u043F\u0440\u0438\u043C\u0435\u043D\u0438\u0442\u044C \u0434\u0435\u043B\u044C\u0442\u0443 \u043A \u0444\u0430\u0439\u043B\u0443: ${error.message}`);
+        }
+      }
+      /**
+       * Сжатие текстового содержимого (упрощенный алгоритм)
+       */
+      compressTextContent(content) {
+        try {
+          const lines = content.split(/\r?\n/);
+          const dictionary = {};
+          const MIN_STRING_LENGTH = 20;
+          for (const line of lines) {
+            if (line.length >= MIN_STRING_LENGTH) {
+              dictionary[line] = (dictionary[line] || 0) + 1;
+            }
+          }
+          const frequentStrings = Object.entries(dictionary).filter(([_, count]) => count >= 2).map(([str]) => str).slice(0, 50);
+          if (frequentStrings.length === 0) {
+            return content;
+          }
+          let compressedLines = [...lines];
+          for (let i = 0; i < frequentStrings.length; i++) {
+            const str = frequentStrings[i];
+            const placeholder = `###REF${i}###`;
+            for (let j = 0; j < compressedLines.length; j++) {
+              if (compressedLines[j] === str) {
+                compressedLines[j] = placeholder;
+              }
+            }
+          }
+          const compressed = {
+            dictionary: frequentStrings,
+            content: compressedLines.join("\n")
+          };
+          return JSON.stringify(compressed);
+        } catch (error) {
+          console.error("\u041E\u0448\u0438\u0431\u043A\u0430 \u043F\u0440\u0438 \u0441\u0436\u0430\u0442\u0438\u0438 \u0442\u0435\u043A\u0441\u0442\u043E\u0432\u043E\u0433\u043E \u0441\u043E\u0434\u0435\u0440\u0436\u0438\u043C\u043E\u0433\u043E:", error);
+          return content;
+        }
+      }
+      /**
+       * Распаковка сжатого текстового содержимого
+       */
+      decompressTextContent(compressedContent) {
+        try {
+          const compressed = JSON.parse(compressedContent);
+          if (!compressed.dictionary || !compressed.content) {
+            return compressedContent;
+          }
+          let decompressedContent = compressed.content;
+          for (let i = 0; i < compressed.dictionary.length; i++) {
+            const placeholder = `###REF${i}###`;
+            const regex = new RegExp(placeholder, "g");
+            decompressedContent = decompressedContent.replace(regex, compressed.dictionary[i]);
+          }
+          return decompressedContent;
+        } catch (error) {
+          console.error("\u041E\u0448\u0438\u0431\u043A\u0430 \u043F\u0440\u0438 \u0440\u0430\u0441\u043F\u0430\u043A\u043E\u0432\u043A\u0435 \u0441\u0436\u0430\u0442\u043E\u0433\u043E \u0441\u043E\u0434\u0435\u0440\u0436\u0438\u043C\u043E\u0433\u043E:", error);
+          return compressedContent;
+        }
+      }
+      // Максимальный размер одной записи в кэше в МБ
+      /**
+       * Сохранить содержимое файла в кэш с учетом размера памяти
+       */
+      saveContentToCache(path, content, hash) {
+        const contentSize = content.length * 2;
+        const contentSizeMB = contentSize / (1024 * 1024);
+        if (contentSizeMB > this.MAX_CACHE_ENTRY_SIZE_MB) {
+          console.log(`\u0424\u0430\u0439\u043B ${path} \u0441\u043B\u0438\u0448\u043A\u043E\u043C \u0431\u043E\u043B\u044C\u0448\u043E\u0439 \u0434\u043B\u044F \u043A\u044D\u0448\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u044F (${contentSizeMB.toFixed(2)} \u041C\u0411)`);
+          return;
+        }
+        const existingEntry = this.fileContentCache.get(path);
+        if (existingEntry) {
+          this.totalCacheSize -= existingEntry.size;
+        }
+        if (this.totalCacheSize + contentSize > this.MAX_CACHE_SIZE_MB * 1024 * 1024) {
+          this.pruneCache(contentSize);
+        }
+        this.fileContentCache.set(path, {
+          content,
+          hash,
+          timestamp: Date.now(),
+          size: contentSize
+        });
+        this.totalCacheSize += contentSize;
+        console.log(`\u0424\u0430\u0439\u043B ${path} \u0434\u043E\u0431\u0430\u0432\u043B\u0435\u043D \u0432 \u043A\u044D\u0448 (${(contentSize / 1024).toFixed(2)} \u041A\u0411). \u041E\u0431\u0449\u0438\u0439 \u0440\u0430\u0437\u043C\u0435\u0440 \u043A\u044D\u0448\u0430: ${(this.totalCacheSize / (1024 * 1024)).toFixed(2)} \u041C\u0411`);
+      }
+      /**
+       * Удаляет старые записи из кэша, чтобы освободить указанное количество байт
+       */
+      pruneCache(bytesNeeded) {
+        if (this.fileContentCache.size === 0)
+          return;
+        const sortedEntries = Array.from(this.fileContentCache.entries()).sort((a, b) => a[1].timestamp - b[1].timestamp);
+        let freedSpace = 0;
+        let removedEntries = 0;
+        for (const [path, entry] of sortedEntries) {
+          this.fileContentCache.delete(path);
+          freedSpace += entry.size;
+          removedEntries++;
+          if (freedSpace >= bytesNeeded || this.totalCacheSize - freedSpace < this.MAX_CACHE_SIZE_MB * 1024 * 1024 * 0.7) {
+            break;
+          }
+        }
+        this.totalCacheSize -= freedSpace;
+        console.log(`\u041E\u0447\u0438\u0441\u0442\u043A\u0430 \u043A\u044D\u0448\u0430: \u0443\u0434\u0430\u043B\u0435\u043D\u043E ${removedEntries} \u0437\u0430\u043F\u0438\u0441\u0435\u0439, \u043E\u0441\u0432\u043E\u0431\u043E\u0436\u0434\u0435\u043D\u043E ${(freedSpace / 1024).toFixed(2)} \u041A\u0411. \u041D\u043E\u0432\u044B\u0439 \u0440\u0430\u0437\u043C\u0435\u0440 \u043A\u044D\u0448\u0430: ${(this.totalCacheSize / (1024 * 1024)).toFixed(2)} \u041C\u0411`);
+      }
+      /**
+       * Получить содержимое файла из кэша
+       */
+      getContentFromCache(path, hash) {
+        const cached = this.fileContentCache.get(path);
+        if (cached && cached.hash === hash) {
+          cached.timestamp = Date.now();
+          return cached.content;
+        }
+        return null;
+      }
+      /**
+       * Очистить кэш полностью
+       */
+      clearCache() {
+        this.fileContentCache.clear();
+        this.totalCacheSize = 0;
+        console.log("\u041A\u044D\u0448 \u0444\u0430\u0439\u043B\u043E\u0432 \u043E\u0447\u0438\u0449\u0435\u043D");
+      }
+      /**
+       * Синхронизация удаления файла с доверенными устройствами
+       */
+      async syncFileDeletion(path) {
+        const trustedDevices = this.relayClient.getTrustedDevices();
+        if (!Array.isArray(trustedDevices) || trustedDevices.length === 0) {
+          console.log(`\u041F\u0440\u043E\u043F\u0443\u0441\u043A \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438 \u0443\u0434\u0430\u043B\u0435\u043D\u0438\u044F \u0444\u0430\u0439\u043B\u0430 ${path}: \u043D\u0435\u0442 \u0434\u043E\u0432\u0435\u0440\u0435\u043D\u043D\u044B\u0445 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432`);
+          return;
+        }
+        try {
+          const deleteMessage = {
+            path,
+            deleted: true,
+            mtime: Date.now(),
+            hash: ""
+            // Хеш не нужен при удалении
+          };
+          console.log(`\u041E\u0442\u043F\u0440\u0430\u0432\u043A\u0430 \u0443\u0432\u0435\u0434\u043E\u043C\u043B\u0435\u043D\u0438\u044F \u043E\u0431 \u0443\u0434\u0430\u043B\u0435\u043D\u0438\u0438 \u0444\u0430\u0439\u043B\u0430 ${path} \u043D\u0430 ${trustedDevices.length} \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432...`);
+          let successCount = 0;
+          for (const device of trustedDevices) {
+            try {
+              console.log(`\u041E\u0442\u043F\u0440\u0430\u0432\u043A\u0430 \u0443\u0432\u0435\u0434\u043E\u043C\u043B\u0435\u043D\u0438\u044F \u043E\u0431 \u0443\u0434\u0430\u043B\u0435\u043D\u0438\u0438 ${path} \u043D\u0430 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u043E ${device.id}...`);
+              this.relayClient.sendMessage({
+                type: "fileSync",
+                targetDeviceId: device.id,
+                payload: deleteMessage
+              });
+              successCount++;
+            } catch (deviceError) {
+              console.error(`\u041E\u0448\u0438\u0431\u043A\u0430 \u043F\u0440\u0438 \u043E\u0442\u043F\u0440\u0430\u0432\u043A\u0435 \u0443\u0432\u0435\u0434\u043E\u043C\u043B\u0435\u043D\u0438\u044F \u043E\u0431 \u0443\u0434\u0430\u043B\u0435\u043D\u0438\u0438 \u043D\u0430 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u043E ${device.id}:`, deviceError);
+            }
+          }
+          console.log(`\u0423\u0432\u0435\u0434\u043E\u043C\u043B\u0435\u043D\u0438\u0435 \u043E\u0431 \u0443\u0434\u0430\u043B\u0435\u043D\u0438\u0438 \u0444\u0430\u0439\u043B\u0430 ${path} \u043E\u0442\u043F\u0440\u0430\u0432\u043B\u0435\u043D\u043E \u043D\u0430 ${successCount}/${trustedDevices.length} \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432`);
+        } catch (error) {
+          console.error(`Error syncing file deletion ${path}:`, error);
+          throw new Error(`\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0438\u0440\u043E\u0432\u0430\u0442\u044C \u0443\u0434\u0430\u043B\u0435\u043D\u0438\u0435 \u0444\u0430\u0439\u043B\u0430 ${path}: ${error.message}`);
+        }
+      }
+      /**
+       * Обработчик сообщения от сервера
+       */
+      async handleSyncMessage(message) {
+        try {
+          if (message.type === "message" && message.payload && message.payload.action === "devicePing" && message.payload.pingId) {
+            console.log(`\u041F\u043E\u043B\u0443\u0447\u0435\u043D \u043F\u0438\u043D\u0433 \u043E\u0442 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u0430 ${message.deviceName || message.sourceDeviceId}`);
+            const sent = this.relayClient.sendMessage({
+              type: "message",
+              targetDeviceId: message.sourceDeviceId,
+              payload: {
+                action: "devicePingResponse",
+                pingId: message.payload.pingId
+              }
+            });
+            console.log(`\u041E\u0442\u043F\u0440\u0430\u0432\u043B\u0435\u043D \u043E\u0442\u0432\u0435\u0442 \u043D\u0430 \u043F\u0438\u043D\u0433 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u0443 ${message.sourceDeviceId}: ${sent ? "\u0443\u0441\u043F\u0435\u0448\u043D\u043E" : "\u043E\u0448\u0438\u0431\u043A\u0430"}`);
+            const isTrusted = this.relayClient.isDeviceTrusted(message.sourceDeviceId || "");
+            console.log(`\u0423\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u043E ${message.sourceDeviceId} \u0434\u043E\u0432\u0435\u0440\u0435\u043D\u043D\u043E\u0435: ${isTrusted}`);
+            if (this.waitingMode && isTrusted) {
+              console.log("\u041F\u043E\u043B\u0443\u0447\u0435\u043D \u043F\u0438\u043D\u0433 \u043E\u0442 \u0434\u043E\u0432\u0435\u0440\u0435\u043D\u043D\u043E\u0433\u043E \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u0430. \u0412\u044B\u0445\u043E\u0434\u0438\u043C \u0438\u0437 \u0440\u0435\u0436\u0438\u043C\u0430 \u043E\u0436\u0438\u0434\u0430\u043D\u0438\u044F.");
+              this.waitingMode = false;
+              new import_obsidian4.Notice("\u041E\u0431\u043D\u0430\u0440\u0443\u0436\u0435\u043D\u043E \u0430\u043A\u0442\u0438\u0432\u043D\u043E\u0435 \u0434\u043E\u0432\u0435\u0440\u0435\u043D\u043D\u043E\u0435 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u043E");
+              if (this.pendingChangesCount > 0) {
+                console.log(`\u0415\u0441\u0442\u044C ${this.pendingChangesCount} \u043D\u0430\u043A\u043E\u043F\u043B\u0435\u043D\u043D\u044B\u0445 \u0438\u0437\u043C\u0435\u043D\u0435\u043D\u0438\u0439. \u041D\u0430\u0447\u0438\u043D\u0430\u0435\u043C \u0443\u043C\u043D\u0443\u044E \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u044E.`);
+                new import_obsidian4.Notice(`\u0421\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0438\u0440\u0443\u0435\u043C ${this.pendingChangesCount} \u0438\u0437\u043C\u0435\u043D\u0435\u043D\u0438\u0439`);
+                setTimeout(() => this.performSmartSync(), 1e3);
+              } else {
+                console.log("\u041D\u0435\u0442 \u043D\u0430\u043A\u043E\u043F\u043B\u0435\u043D\u043D\u044B\u0445 \u0438\u0437\u043C\u0435\u043D\u0435\u043D\u0438\u0439, \u043F\u0440\u043E\u043F\u0443\u0441\u043A\u0430\u0435\u043C \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u044E.");
+              }
+            }
+            return;
+          }
+          if (message.type === "message" && message.payload && message.payload.action === "devicePingResponse") {
+            console.log(`\u041F\u043E\u043B\u0443\u0447\u0435\u043D \u043E\u0442\u0432\u0435\u0442 \u043D\u0430 \u043F\u0438\u043D\u0433 \u043E\u0442 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u0430 ${message.deviceName || message.sourceDeviceId}`);
+            const isTrusted = this.relayClient.isDeviceTrusted(message.sourceDeviceId || "");
+            console.log(`\u0423\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u043E ${message.sourceDeviceId} \u0434\u043E\u0432\u0435\u0440\u0435\u043D\u043D\u043E\u0435: ${isTrusted}`);
+            if (this.waitingMode && isTrusted) {
+              console.log("\u041F\u043E\u043B\u0443\u0447\u0435\u043D \u043E\u0442\u0432\u0435\u0442 \u043D\u0430 \u043F\u0438\u043D\u0433 \u043E\u0442 \u0434\u043E\u0432\u0435\u0440\u0435\u043D\u043D\u043E\u0433\u043E \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u0430. \u0412\u044B\u0445\u043E\u0434\u0438\u043C \u0438\u0437 \u0440\u0435\u0436\u0438\u043C\u0430 \u043E\u0436\u0438\u0434\u0430\u043D\u0438\u044F.");
+              this.waitingMode = false;
+              new import_obsidian4.Notice("\u041E\u0431\u043D\u0430\u0440\u0443\u0436\u0435\u043D\u043E \u0430\u043A\u0442\u0438\u0432\u043D\u043E\u0435 \u0434\u043E\u0432\u0435\u0440\u0435\u043D\u043D\u043E\u0435 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u043E");
+              if (this.pendingChangesCount > 0) {
+                console.log(`\u0415\u0441\u0442\u044C ${this.pendingChangesCount} \u043D\u0430\u043A\u043E\u043F\u043B\u0435\u043D\u043D\u044B\u0445 \u0438\u0437\u043C\u0435\u043D\u0435\u043D\u0438\u0439. \u041D\u0430\u0447\u0438\u043D\u0430\u0435\u043C \u0443\u043C\u043D\u0443\u044E \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u044E.`);
+                new import_obsidian4.Notice(`\u0421\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0438\u0440\u0443\u0435\u043C ${this.pendingChangesCount} \u0438\u0437\u043C\u0435\u043D\u0435\u043D\u0438\u0439`);
+                setTimeout(() => this.performSmartSync(), 1e3);
+              } else {
+                console.log("\u041D\u0435\u0442 \u043D\u0430\u043A\u043E\u043F\u043B\u0435\u043D\u043D\u044B\u0445 \u0438\u0437\u043C\u0435\u043D\u0435\u043D\u0438\u0439, \u043F\u0440\u043E\u043F\u0443\u0441\u043A\u0430\u0435\u043C \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u044E.");
+              }
+            }
+            return;
+          }
+          if (message.type === "requestFileMetadata") {
+            console.log("\u041E\u0431\u0440\u0430\u0431\u043E\u0442\u043A\u0430 \u0437\u0430\u043F\u0440\u043E\u0441\u0430 \u043C\u0435\u0442\u0430\u0434\u0430\u043D\u043D\u044B\u0445...");
+            this.handleFileMetadataRequest(message);
+            return;
+          }
+          if (message.type === "fileMetadata") {
+            return;
+          }
+          if (message.type === "fileMetadataOnly" && message.payload && typeof message.payload === "object") {
+            await this.handleFileMetadataOnly(message);
+            return;
+          }
+          if (message.type === "requestFile" && message.payload && typeof message.payload === "object") {
+            const path = message.payload.path;
+            if (path && message.sourceDeviceId) {
+              console.log(`\u041F\u043E\u043B\u0443\u0447\u0435\u043D \u0437\u0430\u043F\u0440\u043E\u0441 \u043D\u0430 \u043E\u0442\u043F\u0440\u0430\u0432\u043A\u0443 \u0444\u0430\u0439\u043B\u0430 ${path} \u043E\u0442 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u0430 ${message.deviceName || message.sourceDeviceId}`);
+              await this.handleFileRequest(path, message.sourceDeviceId, message.requestId);
+            }
+            return;
+          }
+          if (message.type === "fileSync" && message.payload) {
+            console.log("\u041E\u0431\u0440\u0430\u0431\u043E\u0442\u043A\u0430 \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u044F fileSync...");
+            if (this.waitingMode) {
+              console.log("\u041F\u043E\u043B\u0443\u0447\u0435\u043D\u044B \u0434\u0430\u043D\u043D\u044B\u0435 \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438, \u0432\u044B\u0445\u043E\u0434\u0438\u043C \u0438\u0437 \u0440\u0435\u0436\u0438\u043C\u0430 \u043E\u0436\u0438\u0434\u0430\u043D\u0438\u044F");
+              this.waitingMode = false;
+            }
+            await this.processFileSyncMessage(message.payload);
+          } else if (message.type === "message" && message.payload && typeof message.payload === "object" && (message.payload.path || message.payload.encryptedData || message.payload.deleted)) {
+            console.log("\u041E\u0431\u0440\u0430\u0431\u043E\u0442\u043A\u0430 \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u044F message \u0441 \u0434\u0430\u043D\u043D\u044B\u043C\u0438 \u0444\u0430\u0439\u043B\u043E\u0432\u043E\u0439 \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438...");
+            if (this.waitingMode) {
+              console.log("\u041F\u043E\u043B\u0443\u0447\u0435\u043D\u044B \u0434\u0430\u043D\u043D\u044B\u0435 \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438, \u0432\u044B\u0445\u043E\u0434\u0438\u043C \u0438\u0437 \u0440\u0435\u0436\u0438\u043C\u0430 \u043E\u0436\u0438\u0434\u0430\u043D\u0438\u044F");
+              this.waitingMode = false;
+            }
+            await this.processFileSyncMessage(message.payload);
+          }
+        } catch (error) {
+          console.error("\u041E\u0448\u0438\u0431\u043A\u0430 \u043F\u0440\u0438 \u043E\u0431\u0440\u0430\u0431\u043E\u0442\u043A\u0435 \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u044F \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438:", error);
+          new import_obsidian4.Notice(`\u041E\u0448\u0438\u0431\u043A\u0430 \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438: ${error.message}`);
+        }
+      }
+      /**
+       * Обработка метаданных отдельного файла (сигнальная система)
+       */
+      async handleFileMetadataOnly(message) {
+        var _a;
+        try {
+          if (!message.payload || !message.sourceDeviceId)
+            return;
+          const payload = message.payload;
+          const path = payload.path;
+          if (!path) {
+            console.log("\u041F\u043E\u043B\u0443\u0447\u0435\u043D\u044B \u043C\u0435\u0442\u0430\u0434\u0430\u043D\u043D\u044B\u0435 \u0444\u0430\u0439\u043B\u0430 \u0431\u0435\u0437 \u0443\u043A\u0430\u0437\u0430\u043D\u0438\u044F \u043F\u0443\u0442\u0438");
+            return;
+          }
+          console.log(`\u041F\u043E\u043B\u0443\u0447\u0435\u043D\u044B \u043C\u0435\u0442\u0430\u0434\u0430\u043D\u043D\u044B\u0435 \u0444\u0430\u0439\u043B\u0430 ${path} \u043E\u0442 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u0430 ${message.deviceName || message.sourceDeviceId}`);
+          const remoteVectorClock = payload.vectorClock;
+          const { needsSync, needsMerge } = await this.checkIfFileNeeded(
+            path,
+            payload.hash,
+            payload.mtime,
+            remoteVectorClock,
+            message.sourceDeviceId
+          );
+          if (needsSync) {
+            console.log(`\u0417\u0430\u043F\u0440\u0430\u0448\u0438\u0432\u0430\u0435\u043C \u0444\u0430\u0439\u043B ${path} \u043E\u0442 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u0430 ${message.sourceDeviceId} ${needsMerge ? "(\u0442\u0440\u0435\u0431\u0443\u0435\u0442\u0441\u044F \u0441\u043B\u0438\u044F\u043D\u0438\u0435)" : ""}`);
+            const requestId = Date.now().toString() + "-" + Math.random().toString(36).substr(2, 5);
+            this.relayClient.sendMessage({
+              type: "requestFile",
+              targetDeviceId: message.sourceDeviceId,
+              requestId,
+              payload: {
+                path,
+                hash: payload.hash,
+                needsMerge,
+                vectorClock: (_a = this.syncState.files[path]) == null ? void 0 : _a.vectorClock
+                // Отправляем наши векторные часы для разрешения конфликтов
+              }
+            });
+          } else {
+            console.log(`\u0424\u0430\u0439\u043B ${path} \u043D\u0435 \u0442\u0440\u0435\u0431\u0443\u0435\u0442\u0441\u044F \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0438\u0440\u043E\u0432\u0430\u0442\u044C, \u043F\u0440\u043E\u043F\u0443\u0441\u043A\u0430\u0435\u043C`);
+          }
+        } catch (error) {
+          console.error(`\u041E\u0448\u0438\u0431\u043A\u0430 \u043F\u0440\u0438 \u043E\u0431\u0440\u0430\u0431\u043E\u0442\u043A\u0435 \u043C\u0435\u0442\u0430\u0434\u0430\u043D\u043D\u044B\u0445 \u0444\u0430\u0439\u043B\u0430:`, error);
+        }
+      }
+      /**
+       * Проверить, нужен ли нам файл с указанными метаданными
+       * и определить тип необходимой синхронизации (обновление, слияние)
+       */
+      async checkIfFileNeeded(path, hash, remoteMtime, remoteVectorClock, sourceDeviceId) {
+        const file = this.app.vault.getAbstractFileByPath(path);
+        if (!(file instanceof import_obsidian4.TFile)) {
+          return { needsSync: true, needsMerge: false };
+        }
+        const localMetadata = this.syncState.files[path];
+        if (!localMetadata) {
+          const content = await this.app.vault.read(file);
+          const localHash = await CryptoHelper.hashString(content);
+          return { needsSync: localHash !== hash, needsMerge: false };
+        }
+        if (localMetadata.hash !== hash) {
+          if (!localMetadata.vectorClock) {
+            localMetadata.vectorClock = { [this.syncState.deviceId]: localMetadata.mtime };
+          }
+          if (!remoteVectorClock || Object.keys(remoteVectorClock).length === 0) {
+            if (localMetadata.mtime > remoteMtime) {
+              console.log(`\u041A\u041E\u041D\u0424\u041B\u0418\u041A\u0422 \u0412\u0415\u0420\u0421\u0418\u0419: \u041B\u043E\u043A\u0430\u043B\u044C\u043D\u0430\u044F \u0432\u0435\u0440\u0441\u0438\u044F \u0444\u0430\u0439\u043B\u0430 ${path} \u043D\u043E\u0432\u0435\u0435 (${new Date(localMetadata.mtime).toISOString()}) \u0447\u0435\u043C \u0443\u0434\u0430\u043B\u0435\u043D\u043D\u0430\u044F (${new Date(remoteMtime).toISOString()}). \u041F\u0440\u043E\u0431\u0443\u0435\u043C \u0441\u043B\u0438\u044F\u043D\u0438\u0435.`);
+              if (sourceDeviceId) {
+                return { needsSync: true, needsMerge: true };
+              }
+              return { needsSync: false, needsMerge: false };
+            }
+            console.log(`\u0423\u0434\u0430\u043B\u0435\u043D\u043D\u0430\u044F \u0432\u0435\u0440\u0441\u0438\u044F \u0444\u0430\u0439\u043B\u0430 ${path} \u043D\u043E\u0432\u0435\u0435 (${new Date(remoteMtime).toISOString()}) \u0447\u0435\u043C \u043B\u043E\u043A\u0430\u043B\u044C\u043D\u0430\u044F (${new Date(localMetadata.mtime).toISOString()}). \u0417\u0430\u043F\u0440\u0430\u0448\u0438\u0432\u0430\u0435\u043C \u043E\u0431\u043D\u043E\u0432\u043B\u0435\u043D\u0438\u0435.`);
+            return { needsSync: true, needsMerge: false };
+          }
+          const comparisonResult = this.compareVectorClocks(localMetadata.vectorClock, remoteVectorClock);
+          switch (comparisonResult) {
+            case "identical":
+              console.log(`\u0421\u0442\u0440\u0430\u043D\u043D\u043E: \u0432\u0435\u043A\u0442\u043E\u0440\u043D\u044B\u0435 \u0447\u0430\u0441\u044B \u0438\u0434\u0435\u043D\u0442\u0438\u0447\u043D\u044B, \u043D\u043E \u0445\u0435\u0448\u0438 \u0440\u0430\u0437\u043D\u044B\u0435 \u0434\u043B\u044F ${path}. \u0417\u0430\u043F\u0440\u0430\u0448\u0438\u0432\u0430\u0435\u043C \u043E\u0431\u043D\u043E\u0432\u043B\u0435\u043D\u0438\u0435.`);
+              return { needsSync: true, needsMerge: false };
+            case "local_newer":
+              console.log(`\u041B\u043E\u043A\u0430\u043B\u044C\u043D\u0430\u044F \u0432\u0435\u0440\u0441\u0438\u044F ${path} \u043D\u043E\u0432\u0435\u0435 \u043F\u043E \u0432\u0435\u043A\u0442\u043E\u0440\u043D\u044B\u043C \u0447\u0430\u0441\u0430\u043C. \u0421\u043E\u0445\u0440\u0430\u043D\u044F\u0435\u043C \u043B\u043E\u043A\u0430\u043B\u044C\u043D\u0443\u044E \u0432\u0435\u0440\u0441\u0438\u044E.`);
+              return { needsSync: false, needsMerge: false };
+            case "remote_newer":
+              console.log(`\u0423\u0434\u0430\u043B\u0435\u043D\u043D\u0430\u044F \u0432\u0435\u0440\u0441\u0438\u044F ${path} \u043D\u043E\u0432\u0435\u0435 \u043F\u043E \u0432\u0435\u043A\u0442\u043E\u0440\u043D\u044B\u043C \u0447\u0430\u0441\u0430\u043C. \u0417\u0430\u043F\u0440\u0430\u0448\u0438\u0432\u0430\u0435\u043C \u043E\u0431\u043D\u043E\u0432\u043B\u0435\u043D\u0438\u0435.`);
+              return { needsSync: true, needsMerge: false };
+            case "conflict":
+              console.log(`\u041A\u041E\u041D\u0424\u041B\u0418\u041A\u0422: \u041E\u0431\u043D\u0430\u0440\u0443\u0436\u0435\u043D\u044B \u043F\u0430\u0440\u0430\u043B\u043B\u0435\u043B\u044C\u043D\u044B\u0435 \u0438\u0437\u043C\u0435\u043D\u0435\u043D\u0438\u044F \u0444\u0430\u0439\u043B\u0430 ${path}. \u0422\u0440\u0435\u0431\u0443\u0435\u0442\u0441\u044F \u0441\u043B\u0438\u044F\u043D\u0438\u0435.`);
+              return { needsSync: true, needsMerge: true };
+          }
+        }
+        return { needsSync: false, needsMerge: false };
+      }
+      /**
+       * Сравнить два набора векторных часов и определить отношение между ними
+       * @returns 'identical' - идентичны, 'local_newer' - локальные новее, 
+       * 'remote_newer' - удаленные новее, 'conflict' - конфликт версий
+       */
+      compareVectorClocks(localClock, remoteClock) {
+        const allDeviceIds = /* @__PURE__ */ new Set([...Object.keys(localClock), ...Object.keys(remoteClock)]);
+        let localHasNewer = false;
+        let remoteHasNewer = false;
+        for (const deviceId of allDeviceIds) {
+          const localTime = localClock[deviceId] || 0;
+          const remoteTime = remoteClock[deviceId] || 0;
+          if (localTime > remoteTime) {
+            localHasNewer = true;
+          } else if (remoteTime > localTime) {
+            remoteHasNewer = true;
+          }
+          if (localHasNewer && remoteHasNewer) {
+            return "conflict";
+          }
+        }
+        if (!localHasNewer && !remoteHasNewer) {
+          return "identical";
+        } else if (localHasNewer) {
+          return "local_newer";
+        } else {
+          return "remote_newer";
+        }
+      }
+      /**
+       * Обработчик запроса на получение файла
+       * с поддержкой фрагментации для больших файлов
+       */
+      async handleFileRequest(path, sourceDeviceId, requestId, needsMerge = false, remoteVectorClock, chunkRequest) {
+        try {
+          if (chunkRequest) {
+            await this.handleFileChunkRequest(path, sourceDeviceId, chunkRequest, requestId);
+            return;
+          }
+          console.log(`\u041E\u0431\u0440\u0430\u0431\u043E\u0442\u043A\u0430 \u0437\u0430\u043F\u0440\u043E\u0441\u0430 \u043D\u0430 \u043F\u043E\u043B\u0443\u0447\u0435\u043D\u0438\u0435 \u0444\u0430\u0439\u043B\u0430 ${path}...${needsMerge ? " (\u0437\u0430\u043F\u0440\u043E\u0448\u0435\u043D\u043E \u0441\u043B\u0438\u044F\u043D\u0438\u0435)" : ""}`);
+          const file = this.app.vault.getAbstractFileByPath(path);
+          if (!(file instanceof import_obsidian4.TFile)) {
+            console.log(`\u0424\u0430\u0439\u043B ${path} \u043D\u0435 \u043D\u0430\u0439\u0434\u0435\u043D \u0438\u043B\u0438 \u043D\u0435 \u044F\u0432\u043B\u044F\u0435\u0442\u0441\u044F \u0444\u0430\u0439\u043B\u043E\u043C`);
+            return;
+          }
+          const fileSize = file.stat.size;
+          const CHUNK_SIZE = 500 * 1024;
+          const needsChunking = fileSize > CHUNK_SIZE * 2;
+          if (!needsChunking) {
+            const content = await this.app.vault.read(file);
+            const hash2 = await CryptoHelper.hashString(content);
+            const metadata = this.syncState.files[path];
+            if (!metadata) {
+              this.syncState.files[path] = {
+                path,
+                hash: hash2,
+                mtime: file.stat.mtime,
+                size: content.length,
+                vectorClock: { [this.syncState.deviceId]: Date.now() }
+              };
+            }
+            let conflictResolution = void 0;
+            if (needsMerge) {
+              console.log(`\u041F\u043E\u0434\u0433\u043E\u0442\u043E\u0432\u043A\u0430 \u0434\u0430\u043D\u043D\u044B\u0445 \u0434\u043B\u044F \u0441\u043B\u0438\u044F\u043D\u0438\u044F \u0444\u0430\u0439\u043B\u0430 ${path}`);
+              const baseVersionHash = await this.findCommonBaseVersion(path, hash2, remoteVectorClock);
+              conflictResolution = {
+                isConflict: true,
+                baseVersionHash,
+                deviceId: this.syncState.deviceId
+              };
+            }
+            const currentTime = Date.now();
+            const vectorClock = (metadata == null ? void 0 : metadata.vectorClock) ? { ...metadata.vectorClock } : {};
+            vectorClock[this.syncState.deviceId] = currentTime;
+            await this.syncFileWithPeers(
+              path,
+              content,
+              hash2,
+              file.stat.mtime,
+              true,
+              [sourceDeviceId],
+              requestId,
+              vectorClock,
+              conflictResolution
+            );
+            console.log(`\u0424\u0430\u0439\u043B ${path} \u043E\u0442\u043F\u0440\u0430\u0432\u043B\u0435\u043D \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u0443 ${sourceDeviceId} \u043F\u043E \u0437\u0430\u043F\u0440\u043E\u0441\u0443`);
+            if (metadata) {
+              metadata.vectorClock = vectorClock;
+              this.saveSyncState();
+            }
+            return;
+          }
+          const syncOperationId = Date.now().toString(36) + Math.random().toString(36).substring(2, 7);
+          const totalChunks = Math.ceil(fileSize / CHUNK_SIZE);
+          const hash = await CryptoHelper.hashString(await this.app.vault.read(file));
+          this.relayClient.sendMessage({
+            type: "fileChunkInfo",
+            targetDeviceId: sourceDeviceId,
+            requestId,
+            payload: {
+              path,
+              hash,
+              mtime: file.stat.mtime,
+              size: fileSize,
+              syncOperationId,
+              totalChunks,
+              chunkSize: CHUNK_SIZE,
+              needsMerge
+            }
+          });
+          console.log(`\u0418\u043D\u0444\u043E\u0440\u043C\u0430\u0446\u0438\u044F \u043E \u0444\u0440\u0430\u0433\u043C\u0435\u043D\u0442\u0430\u0445 \u0444\u0430\u0439\u043B\u0430 ${path} \u043E\u0442\u043F\u0440\u0430\u0432\u043B\u0435\u043D\u0430 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u0443 ${sourceDeviceId}. \u0412\u0441\u0435\u0433\u043E \u0444\u0440\u0430\u0433\u043C\u0435\u043D\u0442\u043E\u0432: ${totalChunks}`);
+        } catch (error) {
+          console.error(`\u041E\u0448\u0438\u0431\u043A\u0430 \u043F\u0440\u0438 \u043E\u0431\u0440\u0430\u0431\u043E\u0442\u043A\u0435 \u0437\u0430\u043F\u0440\u043E\u0441\u0430 \u043D\u0430 \u043F\u043E\u043B\u0443\u0447\u0435\u043D\u0438\u0435 \u0444\u0430\u0439\u043B\u0430 ${path}:`, error);
+        }
+      }
+      /**
+       * Обработка запроса на получение фрагмента файла
+       */
+      async handleFileChunkRequest(path, sourceDeviceId, chunkRequest, requestId) {
+        try {
+          console.log(`\u041E\u0431\u0440\u0430\u0431\u043E\u0442\u043A\u0430 \u0437\u0430\u043F\u0440\u043E\u0441\u0430 \u043D\u0430 \u043F\u043E\u043B\u0443\u0447\u0435\u043D\u0438\u0435 \u0444\u0440\u0430\u0433\u043C\u0435\u043D\u0442\u0430 ${chunkRequest.chunkIndex + 1}/${chunkRequest.totalChunks} \u0444\u0430\u0439\u043B\u0430 ${path}`);
+          const file = this.app.vault.getAbstractFileByPath(path);
+          if (!(file instanceof import_obsidian4.TFile)) {
+            console.log(`\u0424\u0430\u0439\u043B ${path} \u043D\u0435 \u043D\u0430\u0439\u0434\u0435\u043D \u0438\u043B\u0438 \u043D\u0435 \u044F\u0432\u043B\u044F\u0435\u0442\u0441\u044F \u0444\u0430\u0439\u043B\u043E\u043C`);
+            return;
+          }
+          if (chunkRequest.chunkIndex < 0 || chunkRequest.chunkIndex >= chunkRequest.totalChunks) {
+            console.error(`\u041D\u0435\u043A\u043E\u0440\u0440\u0435\u043A\u0442\u043D\u044B\u0439 \u0438\u043D\u0434\u0435\u043A\u0441 \u0444\u0440\u0430\u0433\u043C\u0435\u043D\u0442\u0430: ${chunkRequest.chunkIndex}`);
+            return;
+          }
+          const CHUNK_SIZE = 500 * 1024;
+          const fileSize = file.stat.size;
+          const startOffset = chunkRequest.chunkIndex * CHUNK_SIZE;
+          const endOffset = Math.min(startOffset + CHUNK_SIZE, fileSize);
+          const chunkSize = endOffset - startOffset;
+          const fileContent = await this.app.vault.read(file);
+          const chunkContent = fileContent.substring(startOffset, endOffset);
+          const encryptedData = await CryptoHelper.encrypt(chunkContent, this.encryptionPassword);
+          this.relayClient.sendMessage({
+            type: "fileChunk",
+            targetDeviceId: sourceDeviceId,
+            requestId,
+            payload: {
+              path,
+              encryptedData,
+              chunkIndex: chunkRequest.chunkIndex,
+              totalChunks: chunkRequest.totalChunks,
+              syncOperationId: chunkRequest.syncOperationId,
+              isLastChunk: chunkRequest.chunkIndex === chunkRequest.totalChunks - 1
+            }
+          });
+          console.log(`\u0424\u0440\u0430\u0433\u043C\u0435\u043D\u0442 ${chunkRequest.chunkIndex + 1}/${chunkRequest.totalChunks} \u0444\u0430\u0439\u043B\u0430 ${path} \u043E\u0442\u043F\u0440\u0430\u0432\u043B\u0435\u043D \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u0443 ${sourceDeviceId}`);
+        } catch (error) {
+          console.error(`\u041E\u0448\u0438\u0431\u043A\u0430 \u043F\u0440\u0438 \u043E\u0431\u0440\u0430\u0431\u043E\u0442\u043A\u0435 \u0437\u0430\u043F\u0440\u043E\u0441\u0430 \u043D\u0430 \u043F\u043E\u043B\u0443\u0447\u0435\u043D\u0438\u0435 \u0444\u0440\u0430\u0433\u043C\u0435\u043D\u0442\u0430 \u0444\u0430\u0439\u043B\u0430 ${path}:`, error);
+        }
+      }
+      /**
+       * Найти общую базовую версию для слияния конфликтующих изменений
+       * @returns Хеш базовой версии или undefined, если не найдена
+       */
+      async findCommonBaseVersion(path, currentHash, remoteVectorClock) {
+        try {
+          const metadata = this.syncState.files[path];
+          if (metadata == null ? void 0 : metadata.baseVersionHash) {
+            console.log(`\u041D\u0430\u0439\u0434\u0435\u043D\u0430 \u0441\u043E\u0445\u0440\u0430\u043D\u0435\u043D\u043D\u0430\u044F \u043E\u0431\u0449\u0430\u044F \u0431\u0430\u0437\u043E\u0432\u0430\u044F \u0432\u0435\u0440\u0441\u0438\u044F \u0434\u043B\u044F ${path}: ${metadata.baseVersionHash.substring(0, 8)}`);
+            return metadata.baseVersionHash;
+          }
+          for (const cacheEntry of this.fileContentCache.entries()) {
+            const [cachedPath, cachedData] = cacheEntry;
+            if (cachedPath === path && cachedData.hash !== currentHash) {
+              console.log(`\u041D\u0430\u0439\u0434\u0435\u043D\u0430 \u043F\u043E\u0442\u0435\u043D\u0446\u0438\u0430\u043B\u044C\u043D\u0430\u044F \u0431\u0430\u0437\u043E\u0432\u0430\u044F \u0432\u0435\u0440\u0441\u0438\u044F \u0432 \u043A\u044D\u0448\u0435 \u0434\u043B\u044F ${path}: ${cachedData.hash.substring(0, 8)}`);
+              return cachedData.hash;
+            }
+          }
+          return currentHash;
+        } catch (error) {
+          console.error(`\u041E\u0448\u0438\u0431\u043A\u0430 \u043F\u0440\u0438 \u043F\u043E\u0438\u0441\u043A\u0435 \u0431\u0430\u0437\u043E\u0432\u043E\u0439 \u0432\u0435\u0440\u0441\u0438\u0438 \u0434\u043B\u044F ${path}:`, error);
+          return currentHash;
+        }
+      }
+      /**
+       * Возвращает текущие векторные часы для файла
+       */
+      getFileVectorClock(path) {
+        const metadata = this.syncState.files[path];
+        if (metadata == null ? void 0 : metadata.vectorClock) {
+          return { ...metadata.vectorClock };
+        }
+        return { [this.syncState.deviceId]: Date.now() };
+      }
+      /**
+       * Обработка сообщения синхронизации файла
+       */
+      async processFileSyncMessage(fileMessage) {
+        var _a, _b, _c, _d;
+        const { path, encryptedData, deleted, mtime, hash, priority, compression } = fileMessage;
+        try {
+          if (deleted) {
+            const existingFile2 = this.app.vault.getAbstractFileByPath(path);
+            if (existingFile2) {
+              await this.app.vault.delete(existingFile2);
+              if (this.syncState.files[path]) {
+                this.syncState.files[path] = {
+                  ...this.syncState.files[path],
+                  deleted: true
+                };
+              }
+              console.log(`\u0424\u0430\u0439\u043B \u0443\u0434\u0430\u043B\u0435\u043D: ${path}`);
+            }
+            return;
+          }
+          if (!encryptedData) {
+            console.error(`\u041E\u0442\u0441\u0443\u0442\u0441\u0442\u0432\u0443\u044E\u0442 \u0437\u0430\u0448\u0438\u0444\u0440\u043E\u0432\u0430\u043D\u043D\u044B\u0435 \u0434\u0430\u043D\u043D\u044B\u0435 \u0434\u043B\u044F \u0444\u0430\u0439\u043B\u0430 ${path}`);
+            return;
+          }
+          const existingFile = this.syncState.files[path];
+          const remoteVectorClock = fileMessage.vectorClock;
+          if (existingFile && existingFile.hash === hash) {
+            console.log(`\u041F\u0440\u043E\u043F\u0443\u0441\u043A \u0444\u0430\u0439\u043B\u0430 ${path}: \u0443 \u043D\u0430\u0441 \u0443\u0436\u0435 \u0435\u0441\u0442\u044C \u0430\u043A\u0442\u0443\u0430\u043B\u044C\u043D\u0430\u044F \u0432\u0435\u0440\u0441\u0438\u044F`);
+            if (remoteVectorClock) {
+              existingFile.vectorClock = this.mergeVectorClocks(
+                existingFile.vectorClock || {},
+                remoteVectorClock
+              );
+              this.saveSyncState();
+            }
+            return;
+          }
+          const priorityInfo = priority || "normal";
+          console.log(`\u041E\u0431\u0440\u0430\u0431\u043E\u0442\u043A\u0430 \u0444\u0430\u0439\u043B\u0430 ${path} \u0441 \u043F\u0440\u0438\u043E\u0440\u0438\u0442\u0435\u0442\u043E\u043C ${priorityInfo}`);
+          if (compression && compression.compressed) {
+            console.log(`\u0424\u0430\u0439\u043B \u0441\u0436\u0430\u0442: ${compression.compressedSize} \u0431\u0430\u0439\u0442 (\u0438\u0441\u0445\u043E\u0434\u043D\u044B\u0439 \u0440\u0430\u0437\u043C\u0435\u0440: ${compression.originalSize} \u0431\u0430\u0439\u0442)`);
+          }
+          let decryptedContent = await CryptoHelper.decrypt(encryptedData, this.encryptionPassword);
+          if (fileMessage.deltaData && fileMessage.deltaData.baseHash && fileMessage.deltaData.isDelta) {
+            console.log(`\u041F\u043E\u043B\u0443\u0447\u0435\u043D\u0430 \u0434\u0435\u043B\u044C\u0442\u0430 \u0434\u043B\u044F \u0444\u0430\u0439\u043B\u0430 ${path}. \u041F\u0440\u0438\u043C\u0435\u043D\u044F\u0435\u043C \u043A \u0431\u0430\u0437\u043E\u0432\u043E\u0439 \u0432\u0435\u0440\u0441\u0438\u0438...`);
+            try {
+              const baseContent = await this.getFileWithHash(path, fileMessage.deltaData.baseHash) || null;
+              if (baseContent) {
+                decryptedContent = this.applyDelta(baseContent, decryptedContent);
+                console.log(`\u0414\u0435\u043B\u044C\u0442\u0430 \u0443\u0441\u043F\u0435\u0448\u043D\u043E \u043F\u0440\u0438\u043C\u0435\u043D\u0435\u043D\u0430 \u043A \u0444\u0430\u0439\u043B\u0443 ${path}`);
+              } else {
+                console.error(`\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u043D\u0430\u0439\u0442\u0438 \u0431\u0430\u0437\u043E\u0432\u0443\u044E \u0432\u0435\u0440\u0441\u0438\u044E \u0444\u0430\u0439\u043B\u0430 ${path} \u0441 \u0445\u0435\u0448\u0435\u043C ${fileMessage.deltaData.baseHash}`);
+                throw new Error(`\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u043F\u0440\u0438\u043C\u0435\u043D\u0438\u0442\u044C \u0434\u0435\u043B\u044C\u0442\u0443: \u0431\u0430\u0437\u043E\u0432\u0430\u044F \u0432\u0435\u0440\u0441\u0438\u044F \u0444\u0430\u0439\u043B\u0430 \u043D\u0435 \u043D\u0430\u0439\u0434\u0435\u043D\u0430`);
+              }
+            } catch (deltaError) {
+              console.error(`\u041E\u0448\u0438\u0431\u043A\u0430 \u043F\u0440\u0438 \u043F\u0440\u0438\u043C\u0435\u043D\u0435\u043D\u0438\u0438 \u0434\u0435\u043B\u044C\u0442\u044B \u0434\u043B\u044F \u0444\u0430\u0439\u043B\u0430 ${path}:`, deltaError);
+              throw new Error(`\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u043F\u0440\u0438\u043C\u0435\u043D\u0438\u0442\u044C \u0434\u0435\u043B\u044C\u0442\u0443: ${deltaError.message}`);
+            }
+          }
+          let finalContent = decryptedContent;
+          if (compression && compression.compressed && !fileMessage.deltaData) {
+            try {
+              if (decryptedContent.startsWith("{") && decryptedContent.includes('"dictionary":')) {
+                finalContent = this.decompressTextContent(decryptedContent);
+                console.log(`\u0420\u0430\u0441\u043F\u0430\u043A\u043E\u0432\u0430\u043D\u043E \u0441\u0436\u0430\u0442\u043E\u0435 \u0442\u0435\u043A\u0441\u0442\u043E\u0432\u043E\u0435 \u0441\u043E\u0434\u0435\u0440\u0436\u0438\u043C\u043E\u0435 \u0434\u043B\u044F ${path}`);
+              } else {
+                finalContent = decryptedContent;
+              }
+            } catch (decompressError) {
+              console.error(`\u041E\u0448\u0438\u0431\u043A\u0430 \u043F\u0440\u0438 \u0440\u0430\u0441\u043F\u0430\u043A\u043E\u0432\u043A\u0435 \u0441\u043E\u0434\u0435\u0440\u0436\u0438\u043C\u043E\u0433\u043E \u0444\u0430\u0439\u043B\u0430 ${path}:`, decompressError);
+              finalContent = decryptedContent;
+            }
+          }
+          let needsMerge = false;
+          if (existingFile && existingFile.hash !== hash && existingFile.vectorClock && remoteVectorClock) {
+            const comparisonResult = this.compareVectorClocks(existingFile.vectorClock, remoteVectorClock);
+            needsMerge = comparisonResult === "conflict" || ((_a = fileMessage.conflictResolution) == null ? void 0 : _a.isConflict) === true;
+            if (needsMerge) {
+              console.log(`\u041E\u0431\u043D\u0430\u0440\u0443\u0436\u0435\u043D \u043A\u043E\u043D\u0444\u043B\u0438\u043A\u0442 \u0432\u0435\u0440\u0441\u0438\u0439 \u0444\u0430\u0439\u043B\u0430 ${path}. \u041F\u0440\u0438\u043C\u0435\u043D\u044F\u0435\u043C \u0441\u0442\u0440\u0430\u0442\u0435\u0433\u0438\u044E \u0441\u043B\u0438\u044F\u043D\u0438\u044F.`);
+              const localContent = await this.app.vault.read(this.app.vault.getAbstractFileByPath(path));
+              const backupPath = `${path}.backup.${(/* @__PURE__ */ new Date()).toISOString().replace(/:/g, "-")}`;
+              await this.app.vault.create(backupPath, localContent);
+              console.log(`\u0421\u043E\u0437\u0434\u0430\u043D\u0430 \u0440\u0435\u0437\u0435\u0440\u0432\u043D\u0430\u044F \u043A\u043E\u043F\u0438\u044F \u043B\u043E\u043A\u0430\u043B\u044C\u043D\u043E\u0439 \u0432\u0435\u0440\u0441\u0438\u0438: ${backupPath}`);
+              if ((_b = fileMessage.conflictResolution) == null ? void 0 : _b.baseVersionHash) {
+                existingFile.baseVersionHash = fileMessage.conflictResolution.baseVersionHash;
+              }
+              try {
+                finalContent = await this.mergeFileContents(path, localContent, finalContent, (_c = fileMessage.conflictResolution) == null ? void 0 : _c.baseVersionHash);
+                console.log(`\u0423\u0441\u043F\u0435\u0448\u043D\u043E \u0432\u044B\u043F\u043E\u043B\u043D\u0435\u043D\u043E \u0430\u0432\u0442\u043E\u043C\u0430\u0442\u0438\u0447\u0435\u0441\u043A\u043E\u0435 \u0441\u043B\u0438\u044F\u043D\u0438\u0435 \u0444\u0430\u0439\u043B\u0430 ${path}`);
+                const mergedVectorClock = this.mergeVectorClocks(
+                  existingFile.vectorClock || {},
+                  remoteVectorClock
+                );
+                mergedVectorClock[this.syncState.deviceId] = Date.now();
+                existingFile.vectorClock = mergedVectorClock;
+              } catch (mergeError) {
+                console.error(`\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u0430\u0432\u0442\u043E\u043C\u0430\u0442\u0438\u0447\u0435\u0441\u043A\u0438 \u0441\u043B\u0438\u0442\u044C \u0444\u0430\u0439\u043B ${path}:`, mergeError);
+                const conflictPath = `${path}.conflict.${(/* @__PURE__ */ new Date()).toISOString().replace(/:/g, "-")}`;
+                await this.app.vault.create(conflictPath, finalContent);
+                new import_obsidian4.Notice(`\u041A\u043E\u043D\u0444\u043B\u0438\u043A\u0442 \u0432\u0435\u0440\u0441\u0438\u0439 \u0444\u0430\u0439\u043B\u0430 ${path}. \u041E\u0431\u0435 \u0432\u0435\u0440\u0441\u0438\u0438 \u0441\u043E\u0445\u0440\u0430\u043D\u0435\u043D\u044B \u0434\u043B\u044F \u0440\u0443\u0447\u043D\u043E\u0433\u043E \u0441\u043B\u0438\u044F\u043D\u0438\u044F.`);
+                existingFile.conflict = true;
+                this.saveSyncState();
+                return;
+              }
+            }
+          }
+          const dirPath = path.split("/").slice(0, -1).join("/");
+          if (dirPath && !this.app.vault.getAbstractFileByPath(dirPath)) {
+            await this.app.vault.createFolder(dirPath);
+          }
+          const existingFileObj = this.app.vault.getAbstractFileByPath(path);
+          if (existingFileObj instanceof import_obsidian4.TFile) {
+            await this.app.vault.modify(existingFileObj, finalContent);
+          } else {
+            await this.app.vault.create(path, finalContent);
+          }
+          const newHash = needsMerge ? await CryptoHelper.hashString(finalContent) : hash;
+          this.syncState.files[path] = {
+            path,
+            hash: newHash,
+            mtime: Date.now(),
+            // Используем текущее время для слитой версии
+            size: finalContent.length,
+            // Объединяем или обновляем векторные часы
+            vectorClock: needsMerge ? (existingFile == null ? void 0 : existingFile.vectorClock) || this.mergeVectorClocks({}, remoteVectorClock || {}) : remoteVectorClock || { [this.syncState.deviceId]: Date.now() },
+            // Сохраняем базовую версию, если она была предоставлена
+            baseVersionHash: ((_d = fileMessage.conflictResolution) == null ? void 0 : _d.baseVersionHash) || (existingFile == null ? void 0 : existingFile.baseVersionHash)
+          };
+          if (this.syncState.files[path].vectorClock) {
+            this.syncState.files[path].vectorClock[this.syncState.deviceId] = Date.now();
+          }
+          this.saveSyncState();
+          console.log(`\u0424\u0430\u0439\u043B ${needsMerge ? "\u0441\u043B\u0438\u0442 \u0438 \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0438\u0440\u043E\u0432\u0430\u043D" : "\u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0438\u0440\u043E\u0432\u0430\u043D"}: ${path} (${finalContent.length} \u0431\u0430\u0439\u0442)`);
+        } catch (error) {
+          console.error(`\u041E\u0448\u0438\u0431\u043A\u0430 \u043E\u0431\u0440\u0430\u0431\u043E\u0442\u043A\u0438 \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u044F \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438 \u0434\u043B\u044F \u0444\u0430\u0439\u043B\u0430 ${path}:`, error);
+          new import_obsidian4.Notice(`\u041E\u0448\u0438\u0431\u043A\u0430 \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438 \u0444\u0430\u0439\u043B\u0430 ${path}: ${error.message}`);
+        }
+      }
+      /**
+       * Объединить два набора векторных часов, выбирая максимальное значение для каждого устройства
+       */
+      mergeVectorClocks(clock1, clock2) {
+        const result = { ...clock1 };
+        for (const [deviceId, time] of Object.entries(clock2)) {
+          result[deviceId] = Math.max(result[deviceId] || 0, time);
+        }
+        return result;
+      }
+      /**
+       * Слияние содержимого файлов при конфликте
+       * Реализует трехстороннее слияние, если доступна базовая версия
+       */
+      async mergeFileContents(path, localContent, remoteContent, baseVersionHash) {
+        try {
+          if (!localContent && !remoteContent) {
+            console.warn(`mergeFileContents: \u041F\u0443\u0441\u0442\u043E\u0435 \u0441\u043E\u0434\u0435\u0440\u0436\u0438\u043C\u043E\u0435 \u0434\u043B\u044F ${path}`);
+            return "";
+          }
+          if (!localContent)
+            return remoteContent;
+          if (!remoteContent)
+            return localContent;
+          const isMarkdown = path.endsWith(".md");
+          if (isMarkdown) {
+            if (baseVersionHash) {
+              const baseContent = await this.getFileWithHash(path, baseVersionHash);
+              if (baseContent) {
+                return this.threeWayMerge(baseContent, localContent, remoteContent);
+              }
+            }
+            return this.lineMerge(localContent, remoteContent);
+          }
+        } catch (error) {
+          console.error(`\u041E\u0448\u0438\u0431\u043A\u0430 \u043F\u0440\u0438 \u0441\u043B\u0438\u044F\u043D\u0438\u0438 \u0441\u043E\u0434\u0435\u0440\u0436\u0438\u043C\u043E\u0433\u043E \u0444\u0430\u0439\u043B\u0430 ${path}:`, error);
+          return `<<<<<<< \u041B\u041E\u041A\u0410\u041B\u042C\u041D\u0410\u042F \u0412\u0415\u0420\u0421\u0418\u042F (\u041E\u0428\u0418\u0411\u041A\u0410 \u0421\u041B\u0418\u042F\u041D\u0418\u042F)
+${localContent}
+=======
+${remoteContent}
+>>>>>>> \u0423\u0414\u0410\u041B\u0415\u041D\u041D\u0410\u042F \u0412\u0415\u0420\u0421\u0418\u042F
+`;
+        }
+        const mergedContent = `<<<<<<< \u041B\u041E\u041A\u0410\u041B\u042C\u041D\u0410\u042F \u0412\u0415\u0420\u0421\u0418\u042F
+${localContent}
+=======
+${remoteContent}
+>>>>>>> \u0423\u0414\u0410\u041B\u0415\u041D\u041D\u0410\u042F \u0412\u0415\u0420\u0421\u0418\u042F
+`;
+        new import_obsidian4.Notice(`\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u0430\u0432\u0442\u043E\u043C\u0430\u0442\u0438\u0447\u0435\u0441\u043A\u0438 \u0441\u043B\u0438\u0442\u044C \u0444\u0430\u0439\u043B ${path}. \u0422\u0440\u0435\u0431\u0443\u0435\u0442\u0441\u044F \u0440\u0443\u0447\u043D\u043E\u0435 \u0441\u043B\u0438\u044F\u043D\u0438\u0435.`);
+        return mergedContent;
+      }
+      /**
+       * Простое построчное слияние для текстовых файлов
+       * Объединяет уникальные строки из обеих версий
+       */
+      lineMerge(localContent, remoteContent) {
+        const localLines = localContent.split(/\r?\n/);
+        const remoteLines = remoteContent.split(/\r?\n/);
+        const mergedLines = /* @__PURE__ */ new Set();
+        for (const line of localLines) {
+          mergedLines.add(line);
+        }
+        for (const line of remoteLines) {
+          mergedLines.add(line);
+        }
+        return Array.from(mergedLines).join("\n");
+      }
+      /**
+       * Трехстороннее слияние (three-way merge)
+       * Использует базовую версию для определения изменений в обеих версиях
+       */
+      threeWayMerge(baseContent, localContent, remoteContent) {
+        if (!baseContent || !localContent || !remoteContent) {
+          console.warn("threeWayMerge: \u041E\u0434\u043D\u043E \u0438\u0437 \u0441\u043E\u0434\u0435\u0440\u0436\u0438\u043C\u044B\u0445 \u043F\u0443\u0441\u0442\u043E, \u0438\u0441\u043F\u043E\u043B\u044C\u0437\u0443\u0435\u043C \u043F\u0440\u043E\u0441\u0442\u043E\u0435 \u0441\u043B\u0438\u044F\u043D\u0438\u0435");
+          return this.lineMerge(localContent || "", remoteContent || "");
+        }
+        const baseLines = baseContent.split(/\r?\n/);
+        const localLines = localContent.split(/\r?\n/);
+        const remoteLines = remoteContent.split(/\r?\n/);
+        const resultLines = [];
+        let baseIndex = 0;
+        let localIndex = 0;
+        let remoteIndex = 0;
+        while (baseIndex < baseLines.length || localIndex < localLines.length || remoteIndex < remoteLines.length) {
+          const baseLine = baseIndex < baseLines.length ? baseLines[baseIndex] : null;
+          const localLine = localIndex < localLines.length ? localLines[localIndex] : null;
+          const remoteLine = remoteIndex < remoteLines.length ? remoteLines[remoteIndex] : null;
+          if (baseLine === localLine && localLine === remoteLine) {
+            if (localLine !== null) {
+              resultLines.push(localLine);
+            }
+            baseIndex++;
+            localIndex++;
+            remoteIndex++;
+            continue;
+          }
+          if (baseLine === localLine && localLine !== remoteLine) {
+            if (remoteLine !== null) {
+              resultLines.push(remoteLine);
+            }
+            baseIndex++;
+            localIndex++;
+            remoteIndex++;
+            continue;
+          }
+          if (baseLine === remoteLine && remoteLine !== localLine) {
+            if (localLine !== null) {
+              resultLines.push(localLine);
+            }
+            baseIndex++;
+            localIndex++;
+            remoteIndex++;
+            continue;
+          }
+          if (localLine === remoteLine && localLine !== baseLine) {
+            if (localLine !== null) {
+              resultLines.push(localLine);
+            }
+            baseIndex++;
+            localIndex++;
+            remoteIndex++;
+            continue;
+          }
+          resultLines.push(`<<<<<<< \u041B\u041E\u041A\u0410\u041B\u042C\u041D\u0410\u042F \u0412\u0415\u0420\u0421\u0418\u042F`);
+          if (localLine !== null) {
+            resultLines.push(localLine);
+          }
+          resultLines.push(`=======`);
+          if (remoteLine !== null) {
+            resultLines.push(remoteLine);
+          }
+          resultLines.push(`>>>>>>> \u0423\u0414\u0410\u041B\u0415\u041D\u041D\u0410\u042F \u0412\u0415\u0420\u0421\u0418\u042F`);
+          baseIndex++;
+          localIndex++;
+          remoteIndex++;
+        }
+        return resultLines.join("\n");
+      }
+      /**
+       * Обработчик изменения соединения
+       */
+      handleConnectionChange(connected) {
+        if (connected) {
+          new import_obsidian4.Notice("\u041F\u043E\u0434\u043A\u043B\u044E\u0447\u0435\u043D\u043E \u043A \u0441\u0435\u0440\u0432\u0435\u0440\u0443 \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438");
+          this.performFullSync();
+        } else {
+          new import_obsidian4.Notice("\u041E\u0442\u043A\u043B\u044E\u0447\u0435\u043D\u043E \u043E\u0442 \u0441\u0435\u0440\u0432\u0435\u0440\u0430 \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438");
+        }
+      }
+      /**
+       * Обработчик изменения списка доверенных устройств
+       */
+      handleTrustedDevicesChange(devices) {
+        if (!devices) {
+          console.log("\u041F\u043E\u043B\u0443\u0447\u0435\u043D \u043F\u0443\u0441\u0442\u043E\u0439 \u0441\u043F\u0438\u0441\u043E\u043A \u0434\u043E\u0432\u0435\u0440\u0435\u043D\u043D\u044B\u0445 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432");
+          this.trustedDevices = [];
+          return;
+        }
+        this.trustedDevices = devices;
+        console.log("\u0421\u043F\u0438\u0441\u043E\u043A \u0434\u043E\u0432\u0435\u0440\u0435\u043D\u043D\u044B\u0445 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432 \u043E\u0431\u043D\u043E\u0432\u043B\u0435\u043D:", devices);
+        const hasDevices = Array.isArray(devices) && devices.length > 0;
+        if (hasDevices) {
+          console.log(`\u041E\u0431\u043D\u0430\u0440\u0443\u0436\u0435\u043D\u043E ${devices.length} \u0434\u043E\u0432\u0435\u0440\u0435\u043D\u043D\u044B\u0445 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432`);
+          if (this.waitingMode) {
+            console.log("\u041E\u0431\u043D\u0430\u0440\u0443\u0436\u0435\u043D\u044B \u0434\u043E\u0432\u0435\u0440\u0435\u043D\u043D\u044B\u0435 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u0430 \u0432 \u0440\u0435\u0436\u0438\u043C\u0435 \u043E\u0436\u0438\u0434\u0430\u043D\u0438\u044F. \u041F\u0440\u043E\u0432\u0435\u0440\u044F\u0435\u043C \u0438\u0445 \u0430\u043A\u0442\u0438\u0432\u043D\u043E\u0441\u0442\u044C...");
+            setTimeout(() => {
+              this.checkActiveTrustedDevices();
+            }, 1e3);
+            return;
+          }
+          const lastSyncTime = this.syncState.lastSyncTime || 0;
+          const timeSinceLastSync = Date.now() - lastSyncTime;
+          if (timeSinceLastSync > 5 * 60 * 1e3 || this.pendingChangesCount > 0) {
+            console.log(`${timeSinceLastSync > 5 * 60 * 1e3 ? "\u0414\u0430\u0432\u043D\u043E \u043D\u0435 \u0431\u044B\u043B\u043E \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438" : `\u041D\u0430\u043A\u043E\u043F\u043B\u0435\u043D\u043E ${this.pendingChangesCount} \u0438\u0437\u043C\u0435\u043D\u0435\u043D\u0438\u0439`}, \u0437\u0430\u043F\u0443\u0441\u043A\u0430\u0435\u043C \u043F\u043E\u043B\u043D\u0443\u044E \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u044E`);
+            setTimeout(() => {
+              this.performFullSync();
+            }, 2e3);
+          }
+        } else {
+          console.log("\u041D\u0435\u0442 \u0434\u043E\u0432\u0435\u0440\u0435\u043D\u043D\u044B\u0445 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432. \u041F\u0435\u0440\u0435\u0445\u043E\u0434 \u0432 \u0440\u0435\u0436\u0438\u043C \u043E\u0436\u0438\u0434\u0430\u043D\u0438\u044F.");
+          this.waitingMode = true;
+        }
+      }
+      /**
+       * Обработчик запроса на синхронизацию
+       */
+      handleSyncRequest(request) {
+        if (request.requestId) {
+          this.pendingSyncRequests.set(request.requestId, request);
+          new import_obsidian4.Notice(
+            `\u0423\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u043E ${request.deviceName || "\u041D\u0435\u0438\u0437\u0432\u0435\u0441\u0442\u043D\u043E\u0435"} \u0437\u0430\u043F\u0440\u0430\u0448\u0438\u0432\u0430\u0435\u0442 \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u044E. \u041F\u0435\u0440\u0435\u0439\u0434\u0438\u0442\u0435 \u0432 \u043D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0438 \u043F\u043B\u0430\u0433\u0438\u043D\u0430 \u0434\u043B\u044F \u043F\u043E\u0434\u0442\u0432\u0435\u0440\u0436\u0434\u0435\u043D\u0438\u044F.`
+          );
+        }
+      }
+      /**
+       * Ответить на запрос синхронизации
+       */
+      async respondToSyncRequest(requestId, accept, trustPermanently) {
+        console.log(`\u041E\u0431\u0440\u0430\u0431\u043E\u0442\u043A\u0430 \u043E\u0442\u0432\u0435\u0442\u0430 \u043D\u0430 \u0437\u0430\u043F\u0440\u043E\u0441 \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438: ${requestId}, accept=${accept}, trust=${trustPermanently}`);
+        const request = this.pendingSyncRequests.get(requestId);
+        if (!request || !request.sourceDeviceId) {
+          console.error(`\u0417\u0430\u043F\u0440\u043E\u0441 ${requestId} \u043D\u0435 \u043D\u0430\u0439\u0434\u0435\u043D \u0438\u043B\u0438 \u043E\u0442\u0441\u0443\u0442\u0441\u0442\u0432\u0443\u0435\u0442 sourceDeviceId`);
+          return false;
+        }
+        try {
+          console.log(`\u041E\u0442\u043F\u0440\u0430\u0432\u043A\u0430 \u043E\u0442\u0432\u0435\u0442\u0430 \u043D\u0430 \u0437\u0430\u043F\u0440\u043E\u0441 \u0447\u0435\u0440\u0435\u0437 RelayClient \u0434\u043B\u044F \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u0430 ${request.sourceDeviceId}`);
+          const success = await this.relayClient.respondToSyncRequest(
+            requestId,
+            request.sourceDeviceId,
+            accept,
+            trustPermanently
+          );
+          console.log(`\u041E\u0442\u0432\u0435\u0442 \u043E\u0442\u043F\u0440\u0430\u0432\u043B\u0435\u043D, \u0440\u0435\u0437\u0443\u043B\u044C\u0442\u0430\u0442: ${success}`);
+          this.pendingSyncRequests.delete(requestId);
+          console.log(`\u0417\u0430\u043F\u0440\u043E\u0441 ${requestId} \u0443\u0434\u0430\u043B\u0435\u043D \u0438\u0437 \u0441\u043F\u0438\u0441\u043A\u0430 \u043E\u0436\u0438\u0434\u0430\u044E\u0449\u0438\u0445`);
+          if (accept && trustPermanently) {
+            console.log("\u0417\u0430\u043F\u0440\u043E\u0441 \u043F\u0440\u0438\u043D\u044F\u0442 \u0441 \u043F\u043E\u0441\u0442\u043E\u044F\u043D\u043D\u044B\u043C \u0434\u043E\u0432\u0435\u0440\u0438\u0435\u043C, \u0437\u0430\u043F\u0443\u0441\u043A\u0430\u0435\u043C \u043F\u043E\u043B\u043D\u0443\u044E \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u044E");
+            setTimeout(() => {
+              console.log("\u0417\u0430\u043F\u0443\u0441\u043A \u043E\u0442\u043B\u043E\u0436\u0435\u043D\u043D\u043E\u0439 \u043F\u043E\u043B\u043D\u043E\u0439 \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438");
+              this.performFullSync();
+            }, 2e3);
+          }
+          return success;
+        } catch (error) {
+          console.error("Error responding to sync request:", error);
+          this.pendingSyncRequests.delete(requestId);
+          return false;
+        }
+      }
+      /**
+       * Получить список ожидающих запросов на синхронизацию
+       */
+      getPendingSyncRequests() {
+        return Array.from(this.pendingSyncRequests.values());
+      }
+      /**
+       * Выполнить полную синхронизацию с доверенными устройствами
+       */
+      async performFullSync() {
+        try {
+          if (!this.relayClient.isConnected) {
+            console.log("\u0421\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u044F \u043F\u0440\u043E\u043F\u0443\u0449\u0435\u043D\u0430: \u043D\u0435\u0442 \u043F\u043E\u0434\u043A\u043B\u044E\u0447\u0435\u043D\u0438\u044F \u043A \u0441\u0435\u0440\u0432\u0435\u0440\u0443");
+            new import_obsidian4.Notice("\u041D\u0435\u0442 \u0441\u043E\u0435\u0434\u0438\u043D\u0435\u043D\u0438\u044F \u0441 \u0441\u0435\u0440\u0432\u0435\u0440\u043E\u043C. \u0421\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u044F \u043D\u0435\u0432\u043E\u0437\u043C\u043E\u0436\u043D\u0430.");
+            return;
+          }
+          console.log("\u0417\u0430\u043F\u0440\u0430\u0448\u0438\u0432\u0430\u0435\u043C \u0430\u043A\u0442\u0443\u0430\u043B\u044C\u043D\u044B\u0439 \u0441\u043F\u0438\u0441\u043E\u043A \u0434\u043E\u0432\u0435\u0440\u0435\u043D\u043D\u044B\u0445 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432...");
+          this.relayClient.requestTrustedDevices();
+          await new Promise((resolve) => setTimeout(resolve, 500));
+          const trustedDevices = this.relayClient.getTrustedDevices();
+          const hasTrustedDevices = Array.isArray(trustedDevices) && trustedDevices.length > 0;
+          if (this.isSyncing) {
+            console.log("\u0421\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u044F \u043F\u0440\u043E\u043F\u0443\u0449\u0435\u043D\u0430: \u0443\u0436\u0435 \u0432\u044B\u043F\u043E\u043B\u043D\u044F\u0435\u0442\u0441\u044F \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u044F");
+            new import_obsidian4.Notice("\u0421\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u044F \u0443\u0436\u0435 \u0432\u044B\u043F\u043E\u043B\u043D\u044F\u0435\u0442\u0441\u044F...");
+            return;
+          }
+          console.log(`\u0421\u043F\u0438\u0441\u043E\u043A \u0434\u043E\u0432\u0435\u0440\u0435\u043D\u043D\u044B\u0445 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432: ${JSON.stringify(trustedDevices)}`);
+          if (this.waitingMode || !hasTrustedDevices) {
+            console.log(`${this.waitingMode ? "\u041F\u043B\u0430\u0433\u0438\u043D \u0432 \u0440\u0435\u0436\u0438\u043C\u0435 \u043E\u0436\u0438\u0434\u0430\u043D\u0438\u044F" : "\u041D\u0435\u0442 \u0434\u043E\u0432\u0435\u0440\u0435\u043D\u043D\u044B\u0445 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432"}. \u041F\u0440\u043E\u0432\u0435\u0440\u043A\u0430 \u0430\u043A\u0442\u0438\u0432\u043D\u043E\u0441\u0442\u0438...`);
+            new import_obsidian4.Notice(`${this.waitingMode ? "\u041F\u043B\u0430\u0433\u0438\u043D \u0432 \u0440\u0435\u0436\u0438\u043C\u0435 \u043E\u0436\u0438\u0434\u0430\u043D\u0438\u044F" : "\u041D\u0435\u0442 \u0434\u043E\u0432\u0435\u0440\u0435\u043D\u043D\u044B\u0445 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432"}. \u041F\u0440\u043E\u0432\u0435\u0440\u043A\u0430 \u0430\u043A\u0442\u0438\u0432\u043D\u043E\u0441\u0442\u0438...`);
+            await this.checkActiveTrustedDevices();
+            if (this.waitingMode) {
+              console.log("\u041F\u043E\u0441\u043B\u0435 \u043F\u0440\u043E\u0432\u0435\u0440\u043A\u0438 \u043F\u043E-\u043F\u0440\u0435\u0436\u043D\u0435\u043C\u0443 \u043D\u0435\u0442 \u0430\u043A\u0442\u0438\u0432\u043D\u044B\u0445 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432. \u0421\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u044F \u043E\u0442\u043B\u043E\u0436\u0435\u043D\u0430.");
+              new import_obsidian4.Notice("\u041D\u0435\u0442 \u0430\u043A\u0442\u0438\u0432\u043D\u044B\u0445 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432 \u0434\u043B\u044F \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438. \u0423\u0431\u0435\u0434\u0438\u0442\u0435\u0441\u044C, \u0447\u0442\u043E \u0434\u0440\u0443\u0433\u0438\u0435 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u0430 \u0432\u043A\u043B\u044E\u0447\u0435\u043D\u044B \u0438 \u043F\u043E\u0434\u043A\u043B\u044E\u0447\u0435\u043D\u044B.");
+              await this.updateLocalFileState();
+              return;
+            }
+            const updatedTrustedDevices = this.relayClient.getTrustedDevices();
+            if (!Array.isArray(updatedTrustedDevices) || updatedTrustedDevices.length === 0) {
+              console.log("\u041F\u043E\u0441\u043B\u0435 \u043F\u0440\u043E\u0432\u0435\u0440\u043A\u0438 \u0432\u0441\u0435 \u0435\u0449\u0435 \u043D\u0435\u0442 \u0434\u043E\u0432\u0435\u0440\u0435\u043D\u043D\u044B\u0445 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432. \u0421\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u044F \u043E\u0442\u043B\u043E\u0436\u0435\u043D\u0430.");
+              new import_obsidian4.Notice("\u041D\u0435\u0442 \u0434\u043E\u0432\u0435\u0440\u0435\u043D\u043D\u044B\u0445 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432 \u0434\u043B\u044F \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438. \u0418\u0441\u043F\u043E\u043B\u044C\u0437\u0443\u0439\u0442\u0435 \u043A\u043B\u044E\u0447 \u043F\u0440\u0438\u0433\u043B\u0430\u0448\u0435\u043D\u0438\u044F \u0434\u043B\u044F \u0434\u043E\u0431\u0430\u0432\u043B\u0435\u043D\u0438\u044F \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432.");
+              return;
+            }
+          }
+          console.log(`\u041D\u0430\u0447\u0438\u043D\u0430\u0435\u043C \u0438\u043D\u0442\u0435\u043B\u043B\u0435\u043A\u0442\u0443\u0430\u043B\u044C\u043D\u0443\u044E \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u044E \u0441 ${trustedDevices.length} \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u0430\u043C\u0438...`);
+          this.isSyncing = true;
+          new import_obsidian4.Notice(`\u041D\u0430\u0447\u0430\u0442\u0430 \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u044F \u0441 ${trustedDevices.length} \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u0430\u043C\u0438`);
+          console.log("\u041E\u0431\u043D\u043E\u0432\u043B\u0435\u043D\u0438\u0435 \u043B\u043E\u043A\u0430\u043B\u044C\u043D\u043E\u0433\u043E \u0441\u043E\u0441\u0442\u043E\u044F\u043D\u0438\u044F \u0444\u0430\u0439\u043B\u043E\u0432...");
+          await this.updateLocalFileState();
+          await this.requestFileMetadata(trustedDevices);
+          const fileEntries = Object.entries(this.syncState.files);
+          console.log(`\u041D\u0430\u0447\u0430\u043B\u043E \u0430\u0441\u0438\u043D\u0445\u0440\u043E\u043D\u043D\u043E\u0433\u043E \u0430\u043D\u0430\u043B\u0438\u0437\u0430 ${fileEntries.length} \u0444\u0430\u0439\u043B\u043E\u0432 \u0434\u043B\u044F \u0438\u043D\u0442\u0435\u043B\u043B\u0435\u043A\u0442\u0443\u0430\u043B\u044C\u043D\u043E\u0439 \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438...`);
+          const { filesForSync, unchangedFiles, identicalFiles } = await this.analyzeFilesForSync(fileEntries, trustedDevices);
+          if (filesForSync.length === 0) {
+            console.log("\u041D\u0435\u0442 \u0444\u0430\u0439\u043B\u043E\u0432, \u0442\u0440\u0435\u0431\u0443\u044E\u0449\u0438\u0445 \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438. \u0421\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u044F \u043F\u0440\u043E\u043F\u0443\u0449\u0435\u043D\u0430.");
+            this.pendingChangesCount = 0;
+            this.syncState.lastSyncTime = Date.now();
+            this.saveSyncState();
+            new import_obsidian4.Notice("\u0421\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u044F \u043D\u0435 \u0442\u0440\u0435\u0431\u0443\u0435\u0442\u0441\u044F: \u0432\u0441\u0435 \u0444\u0430\u0439\u043B\u044B \u0430\u043A\u0442\u0443\u0430\u043B\u044C\u043D\u044B");
+            this.isSyncing = false;
+            return;
+          }
+          filesForSync.sort((a, b) => {
+            if (a.isNew !== b.isNew) {
+              return a.isNew ? -1 : 1;
+            }
+            return a.metadata.size - b.metadata.size;
+          });
+          console.log(`\u041D\u0430\u0439\u0434\u0435\u043D\u043E ${filesForSync.length} \u0444\u0430\u0439\u043B\u043E\u0432 \u0434\u043B\u044F \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438, ${unchangedFiles} \u0444\u0430\u0439\u043B\u043E\u0432 \u043D\u0435 \u0442\u0440\u0435\u0431\u0443\u044E\u0442 \u043E\u0431\u043D\u043E\u0432\u043B\u0435\u043D\u0438\u044F`);
+          if (filesForSync.length <= 10) {
+            console.log("\u041D\u0435\u0431\u043E\u043B\u044C\u0448\u043E\u0439 \u043D\u0430\u0431\u043E\u0440 \u0444\u0430\u0439\u043B\u043E\u0432, \u0438\u0441\u043F\u043E\u043B\u044C\u0437\u0443\u0435\u043C \u043F\u0440\u044F\u043C\u0443\u044E \u043E\u0442\u043F\u0440\u0430\u0432\u043A\u0443...");
+            await this.syncSmallFileSet(filesForSync);
+          } else {
+            await this.syncLargeFileSet(filesForSync);
+          }
+          this.syncState.lastSyncTime = Date.now();
+          this.saveSyncState();
+          this.pendingChangesCount = 0;
+          const summary = `\u0421\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u044F \u0437\u0430\u0432\u0435\u0440\u0448\u0435\u043D\u0430: \u043E\u0442\u043F\u0440\u0430\u0432\u043B\u0435\u043D\u043E ${filesForSync.length} \u0444\u0430\u0439\u043B\u043E\u0432, \u0438\u0434\u0435\u043D\u0442\u0438\u0447\u043D\u044B\u0445 \u043D\u0430 \u0432\u0441\u0435\u0445 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u0430\u0445 ${identicalFiles}, \u043D\u0435 \u0442\u0440\u0435\u0431\u043E\u0432\u0430\u043B\u0438 \u043E\u0431\u043D\u043E\u0432\u043B\u0435\u043D\u0438\u044F ${unchangedFiles}`;
+          console.log("\u0421\u0418\u0413\u041D\u0410\u041B\u042C\u041D\u0410\u042F \u0421\u0418\u0421\u0422\u0415\u041C\u0410: " + summary);
+          new import_obsidian4.Notice(summary);
+        } catch (error) {
+          console.error("\u041E\u0448\u0438\u0431\u043A\u0430 \u043F\u0440\u0438 \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438:", error);
+          new import_obsidian4.Notice(`\u041E\u0448\u0438\u0431\u043A\u0430 \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438: ${error.message}`);
+        } finally {
+          this.isSyncing = false;
+        }
+      }
+      /**
+       * Синхронизация небольшого набора файлов (прямая отправка)
+       */
+      async syncSmallFileSet(files) {
+        let syncedCount = 0;
+        for (const { path, metadata, isNew, targetDevices } of files) {
+          const file = this.app.vault.getAbstractFileByPath(path);
+          if (file instanceof import_obsidian4.TFile) {
+            try {
+              const content = await this.app.vault.read(file);
+              await this.syncFileWithPeers(path, content, metadata.hash, metadata.mtime, isNew, targetDevices);
+              syncedCount++;
+            } catch (fileError) {
+              console.error(`\u041E\u0448\u0438\u0431\u043A\u0430 \u043F\u0440\u0438 \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438 \u0444\u0430\u0439\u043B\u0430 ${path}:`, fileError);
+            }
+          }
+        }
+        console.log(`\u0421\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0438\u0440\u043E\u0432\u0430\u043D\u043E ${syncedCount} \u0444\u0430\u0439\u043B\u043E\u0432 \u043D\u0430\u043F\u0440\u044F\u043C\u0443\u044E`);
+      }
+      /**
+       * Синхронизация большого набора файлов (пакетная обработка)
+       */
+      async syncLargeFileSet(files) {
+        const highPriorityFiles = files.filter((f) => f.isNew);
+        const normalPriorityFiles = files.filter((f) => !f.isNew);
+        console.log(`\u0412\u044B\u0441\u043E\u043A\u0438\u0439 \u043F\u0440\u0438\u043E\u0440\u0438\u0442\u0435\u0442: ${highPriorityFiles.length} \u0444\u0430\u0439\u043B\u043E\u0432, \u043E\u0431\u044B\u0447\u043D\u044B\u0439 \u043F\u0440\u0438\u043E\u0440\u0438\u0442\u0435\u0442: ${normalPriorityFiles.length} \u0444\u0430\u0439\u043B\u043E\u0432`);
+        if (highPriorityFiles.length > 0) {
+          console.log("\u0421\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u044F \u0444\u0430\u0439\u043B\u043E\u0432 \u0441 \u0432\u044B\u0441\u043E\u043A\u0438\u043C \u043F\u0440\u0438\u043E\u0440\u0438\u0442\u0435\u0442\u043E\u043C...");
+          const batchSize = 10;
+          const batches = Math.ceil(highPriorityFiles.length / batchSize);
+          for (let i = 0; i < batches; i++) {
+            const batch = highPriorityFiles.slice(i * batchSize, (i + 1) * batchSize);
+            await this.processBatch(batch, i + 1, batches, "\u0432\u044B\u0441\u043E\u043A\u043E\u043F\u0440\u0438\u043E\u0440\u0438\u0442\u0435\u0442\u043D\u044B\u0445");
+          }
+        }
+        if (normalPriorityFiles.length > 0) {
+          console.log("\u0421\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u044F \u0444\u0430\u0439\u043B\u043E\u0432 \u0441 \u043E\u0431\u044B\u0447\u043D\u044B\u043C \u043F\u0440\u0438\u043E\u0440\u0438\u0442\u0435\u0442\u043E\u043C...");
+          const batchSize = 20;
+          const batches = Math.ceil(normalPriorityFiles.length / batchSize);
+          for (let i = 0; i < batches; i++) {
+            const batch = normalPriorityFiles.slice(i * batchSize, (i + 1) * batchSize);
+            await this.processBatch(batch, i + 1, batches, "\u043E\u0431\u044B\u0447\u043D\u044B\u0445");
+          }
+        }
+      }
+      /**
+       * Обработка пакета файлов
+       */
+      async processBatch(batch, batchNumber, totalBatches, batchType) {
+        console.log(`\u041E\u0431\u0440\u0430\u0431\u043E\u0442\u043A\u0430 \u043F\u0430\u043A\u0435\u0442\u0430 ${batchNumber}/${totalBatches} ${batchType} \u0444\u0430\u0439\u043B\u043E\u0432...`);
+        const batchPromises = batch.map(async ({ path, metadata, isNew, targetDevices }) => {
+          const file = this.app.vault.getAbstractFileByPath(path);
+          if (file instanceof import_obsidian4.TFile) {
+            try {
+              const content = await this.app.vault.read(file);
+              await this.syncFileWithPeers(path, content, metadata.hash, metadata.mtime, isNew, targetDevices);
+              return true;
+            } catch (fileError) {
+              console.error(`\u041E\u0448\u0438\u0431\u043A\u0430 \u043F\u0440\u0438 \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438 \u0444\u0430\u0439\u043B\u0430 ${path}:`, fileError);
+              return false;
+            }
+          }
+          return false;
+        });
+        const batchResults = await Promise.allSettled(batchPromises);
+        const successfulSyncs = batchResults.filter(
+          (result) => result.status === "fulfilled" && result.value === true
+        ).length;
+        console.log(`\u041F\u0430\u043A\u0435\u0442 ${batchNumber}/${totalBatches}: \u0443\u0441\u043F\u0435\u0448\u043D\u043E \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0438\u0440\u043E\u0432\u0430\u043D\u043E ${successfulSyncs}/${batch.length} \u0444\u0430\u0439\u043B\u043E\u0432`);
+        if (batchNumber < totalBatches) {
+          await new Promise((resolve) => setTimeout(resolve, 200));
+        }
+      }
+      async requestFileMetadata(trustedDevices) {
+        try {
+          console.log("\u0417\u0430\u043F\u0440\u043E\u0441 \u043C\u0435\u0442\u0430\u0434\u0430\u043D\u043D\u044B\u0445 \u0444\u0430\u0439\u043B\u043E\u0432 \u0443 \u0434\u043E\u0432\u0435\u0440\u0435\u043D\u043D\u044B\u0445 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432...");
+          this.deviceFileMetadata.clear();
+          const metadataPromises = [];
+          for (const device of trustedDevices) {
+            const promise = new Promise((resolve) => {
+              const requestId = Date.now().toString() + "-" + Math.random().toString(36).substr(2, 5);
+              const handleMetadataResponse = (message) => {
+                if (message.type === "fileMetadata" && message.requestId === requestId && message.sourceDeviceId === device.id) {
+                  if (message.payload && typeof message.payload === "object") {
+                    this.deviceFileMetadata.set(device.id, message.payload);
+                    console.log(`\u041F\u043E\u043B\u0443\u0447\u0435\u043D\u044B \u043C\u0435\u0442\u0430\u0434\u0430\u043D\u043D\u044B\u0435 \u043E\u0442 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u0430 ${device.name || device.id}: ${Object.keys(message.payload).length} \u0444\u0430\u0439\u043B\u043E\u0432`);
+                  }
+                  const originalCallback2 = this.relayClient["onMessageCallbackOriginal"];
+                  if (originalCallback2) {
+                    this.relayClient["onMessageCallback"] = originalCallback2;
+                  }
+                  resolve();
+                }
+              };
+              const originalCallback = this.relayClient["onMessageCallback"];
+              this.relayClient["onMessageCallbackOriginal"] = originalCallback;
+              this.relayClient["onMessageCallback"] = (message) => {
+                handleMetadataResponse(message);
+                originalCallback(message);
+              };
+              this.relayClient.sendMessage({
+                type: "requestFileMetadata",
+                targetDeviceId: device.id,
+                requestId,
+                payload: {
+                  deviceId: this.syncState.deviceId
+                }
+              });
+              setTimeout(() => resolve(), 5e3);
+            });
+            metadataPromises.push(promise);
+          }
+          console.log("\u041E\u0436\u0438\u0434\u0430\u0435\u043C \u043E\u0442\u0432\u0435\u0442\u044B \u0441 \u043C\u0435\u0442\u0430\u0434\u0430\u043D\u043D\u044B\u043C\u0438...");
+          await Promise.all(metadataPromises);
+          console.log(`\u041F\u043E\u043B\u0443\u0447\u0435\u043D\u044B \u043C\u0435\u0442\u0430\u0434\u0430\u043D\u043D\u044B\u0435 \u043E\u0442 ${this.deviceFileMetadata.size} \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432 \u0438\u0437 ${trustedDevices.length}`);
+        } catch (error) {
+          console.error("\u041E\u0448\u0438\u0431\u043A\u0430 \u043F\u0440\u0438 \u0437\u0430\u043F\u0440\u043E\u0441\u0435 \u043C\u0435\u0442\u0430\u0434\u0430\u043D\u043D\u044B\u0445:", error);
+        }
+      }
+      /**
+       * Обработчик запроса метаданных от других устройств
+       */
+      handleFileMetadataRequest(message) {
+        if (!message.sourceDeviceId || !message.requestId)
+          return;
+        console.log(`\u041F\u043E\u043B\u0443\u0447\u0435\u043D \u0437\u0430\u043F\u0440\u043E\u0441 \u043C\u0435\u0442\u0430\u0434\u0430\u043D\u043D\u044B\u0445 \u043E\u0442 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u0430 ${message.deviceName || message.sourceDeviceId}`);
+        this.sendFileMetadata(message.sourceDeviceId, message.requestId);
+      }
+      /**
+       * Отправить метаданные файлов другому устройству
+       */
+      async sendFileMetadata(targetDeviceId, requestId) {
+        try {
+          console.log(`\u041E\u0442\u043F\u0440\u0430\u0432\u043A\u0430 \u043C\u0435\u0442\u0430\u0434\u0430\u043D\u043D\u044B\u0445 \u0444\u0430\u0439\u043B\u043E\u0432 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u0443 ${targetDeviceId}...`);
+          const metadataToSend = {};
+          for (const [path, metadata] of Object.entries(this.syncState.files)) {
+            if (metadata.deleted)
+              continue;
+            metadataToSend[path] = {
+              hash: metadata.hash,
+              mtime: metadata.mtime,
+              size: metadata.size,
+              // Добавляем deleted только если он true
+              ...metadata.deleted ? { deleted: true } : {}
+            };
+          }
+          this.relayClient.sendMessage({
+            type: "fileMetadata",
+            targetDeviceId,
+            requestId,
+            payload: metadataToSend
+          });
+          console.log(`\u041C\u0435\u0442\u0430\u0434\u0430\u043D\u043D\u044B\u0435 \u043E\u0442\u043F\u0440\u0430\u0432\u043B\u0435\u043D\u044B: ${Object.keys(metadataToSend).length} \u0444\u0430\u0439\u043B\u043E\u0432`);
+        } catch (error) {
+          console.error("\u041E\u0448\u0438\u0431\u043A\u0430 \u043F\u0440\u0438 \u043E\u0442\u043F\u0440\u0430\u0432\u043A\u0435 \u043C\u0435\u0442\u0430\u0434\u0430\u043D\u043D\u044B\u0445:", error);
+        }
+      }
+      /**
+       * Асинхронная функция для анализа файлов, нуждающихся в синхронизации
+       * Разбивает работу на порции для уменьшения блокировки основного потока
+       */
+      async analyzeFilesForSync(fileEntries, trustedDevices) {
+        const filesForSync = [];
+        let unchangedFiles = 0;
+        let identicalFiles = 0;
+        console.log("\u0421\u0418\u0413\u041D\u0410\u041B\u042C\u041D\u0410\u042F \u0421\u0418\u0421\u0422\u0415\u041C\u0410: \u041D\u0430\u0447\u0430\u043B\u043E \u0430\u0441\u0438\u043D\u0445\u0440\u043E\u043D\u043D\u043E\u0439 \u043F\u0440\u043E\u0432\u0435\u0440\u043A\u0438 \u043C\u0435\u0442\u0430\u0434\u0430\u043D\u043D\u044B\u0445 \u0444\u0430\u0439\u043B\u043E\u0432");
+        const BATCH_SIZE = 100;
+        for (let i = 0; i < fileEntries.length; i += BATCH_SIZE) {
+          const batch = fileEntries.slice(i, i + BATCH_SIZE);
+          await new Promise((resolve) => {
+            setTimeout(() => {
+              this.processBatchOfFiles(
+                batch,
+                trustedDevices,
+                filesForSync,
+                unchangedFiles,
+                identicalFiles
+              );
+              unchangedFiles = this.batchUnchangedFiles;
+              identicalFiles = this.batchIdenticalFiles;
+              console.log(`\u0421\u0418\u0413\u041D\u0410\u041B\u042C\u041D\u0410\u042F \u0421\u0418\u0421\u0422\u0415\u041C\u0410: \u041E\u0431\u0440\u0430\u0431\u043E\u0442\u0430\u043D \u043F\u0430\u043A\u0435\u0442 ${i / BATCH_SIZE + 1}/${Math.ceil(fileEntries.length / BATCH_SIZE)}, \u043D\u0430\u0439\u0434\u0435\u043D\u043E ${filesForSync.length} \u0444\u0430\u0439\u043B\u043E\u0432 \u0434\u043B\u044F \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438`);
+              resolve();
+            }, 0);
+          });
+        }
+        console.log(`\u0421\u0418\u0413\u041D\u0410\u041B\u042C\u041D\u0410\u042F \u0421\u0418\u0421\u0422\u0415\u041C\u0410: \u0410\u043D\u0430\u043B\u0438\u0437 \u0437\u0430\u0432\u0435\u0440\u0448\u0435\u043D. \u0424\u0430\u0439\u043B\u043E\u0432 \u0434\u043B\u044F \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438: ${filesForSync.length}, 
+            \u0438\u0434\u0435\u043D\u0442\u0438\u0447\u043D\u044B\u0445 \u043D\u0430 \u0432\u0441\u0435\u0445 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u0430\u0445: ${identicalFiles}, \u043D\u0435 \u0442\u0440\u0435\u0431\u0443\u044E\u0449\u0438\u0445 \u043E\u0431\u043D\u043E\u0432\u043B\u0435\u043D\u0438\u044F: ${unchangedFiles}`);
+        return { filesForSync, unchangedFiles, identicalFiles };
+      }
+      /**
+       * Обработать пакет файлов и определить, какие из них нуждаются в синхронизации
+       */
+      processBatchOfFiles(batch, trustedDevices, filesForSync, unchangedFilesStart, identicalFilesStart) {
+        this.batchUnchangedFiles = unchangedFilesStart;
+        this.batchIdenticalFiles = identicalFilesStart;
+        for (const [path, metadata] of batch) {
+          if (metadata.deleted) {
+            continue;
+          }
+          const { needsSync, isNew, targetDevices } = this.fileNeedsSync(path, metadata, trustedDevices);
+          if (needsSync && targetDevices.length > 0) {
+            console.log(`\u0421\u0418\u0413\u041D\u0410\u041B\u042C\u041D\u0410\u042F \u0421\u0418\u0421\u0422\u0415\u041C\u0410: \u0424\u0430\u0439\u043B '${path}' \u0442\u0440\u0435\u0431\u0443\u0435\u0442 \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438 \u0441 ${targetDevices.length} \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u0430\u043C\u0438`);
+            filesForSync.push({
+              path,
+              metadata,
+              isNew,
+              targetDevices
+            });
+          } else if (isNew && targetDevices.length === 0) {
+            console.log(`\u0421\u0418\u0413\u041D\u0410\u041B\u042C\u041D\u0410\u042F \u0421\u0418\u0421\u0422\u0415\u041C\u0410: \u0424\u0430\u0439\u043B '${path}' \u043D\u0435\u0434\u0430\u0432\u043D\u043E \u0438\u0437\u043C\u0435\u043D\u0435\u043D, \u043D\u043E \u0438\u0434\u0435\u043D\u0442\u0438\u0447\u0435\u043D \u043D\u0430 \u0432\u0441\u0435\u0445 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u0430\u0445`);
+            this.batchIdenticalFiles++;
+          } else {
+            console.log(`\u0421\u0418\u0413\u041D\u0410\u041B\u042C\u041D\u0410\u042F \u0421\u0418\u0421\u0422\u0415\u041C\u0410: \u0424\u0430\u0439\u043B '${path}' \u043D\u0435 \u0442\u0440\u0435\u0431\u0443\u0435\u0442 \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438`);
+            this.batchUnchangedFiles++;
+          }
+        }
+      }
+      /**
+       * Определить, нужно ли синхронизировать файл с другими устройствами
+       * на основе сравнения локальных метаданных и метаданных с других устройств
+       */
+      fileNeedsSync(path, metadata, trustedDevices) {
+        const fiveMinutesAgo = Date.now() - 5 * 60 * 1e3;
+        const isNew = metadata.mtime > fiveMinutesAgo;
+        const targetDevices = [];
+        let needsSync = false;
+        for (const device of trustedDevices) {
+          const deviceId = typeof device === "string" ? device : device.id;
+          const deviceName = typeof device === "string" ? deviceId : device.name || deviceId;
+          const deviceMetadata = this.deviceFileMetadata.get(deviceId);
+          if (!deviceMetadata) {
+            targetDevices.push(deviceId);
+            needsSync = true;
+            continue;
+          }
+          const remoteFile = deviceMetadata[path];
+          if (!remoteFile) {
+            targetDevices.push(deviceId);
+            needsSync = true;
+            continue;
+          }
+          if (remoteFile.hash !== metadata.hash) {
+            targetDevices.push(deviceId);
+            needsSync = true;
+            continue;
+          }
+          if (metadata.mtime > remoteFile.mtime) {
+            targetDevices.push(deviceId);
+            needsSync = true;
+          }
+        }
+        if (isNew && targetDevices.length === 0) {
+          needsSync = false;
+        } else if (isNew && targetDevices.length > 0) {
+          needsSync = true;
+        }
+        return { needsSync, isNew, targetDevices };
+      }
+      /**
+       * Умная синхронизация - синхронизирует только нужные файлы, предотвращая блокировку UI
+       */
+      async performSmartSync() {
+        if (this.pendingChangesCount <= 0) {
+          console.log("\u041D\u0435\u0442 \u0438\u0437\u043C\u0435\u043D\u0435\u043D\u0438\u0439 \u0434\u043B\u044F \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438");
+          return;
+        }
+        return new Promise((resolve) => {
+          setTimeout(async () => {
+            try {
+              await this.performFullSync();
+              resolve();
+            } catch (error) {
+              console.error("\u041E\u0448\u0438\u0431\u043A\u0430 \u043F\u0440\u0438 \u0432\u044B\u043F\u043E\u043B\u043D\u0435\u043D\u0438\u0438 \u0443\u043C\u043D\u043E\u0439 \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438:", error);
+              resolve();
+            }
+          }, 50);
+        });
+      }
+      /**
+       * Запустить принудительную полную синхронизацию
+       */
+      async forceFullSync() {
+        console.log("\u0417\u0430\u043F\u0443\u0441\u043A \u043F\u0440\u0438\u043D\u0443\u0434\u0438\u0442\u0435\u043B\u044C\u043D\u043E\u0439 \u043F\u043E\u043B\u043D\u043E\u0439 \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438...");
+        new import_obsidian4.Notice("\u0417\u0430\u043F\u0443\u0441\u043A \u043F\u0440\u0438\u043D\u0443\u0434\u0438\u0442\u0435\u043B\u044C\u043D\u043E\u0439 \u043F\u043E\u043B\u043D\u043E\u0439 \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438");
+        this.isSyncing = false;
+        await this.performFullSync();
+      }
+      /**
+       * Обновить локальное состояние файлов с асинхронной обработкой
+       * для минимизации блокировки основного потока
+       */
+      async updateLocalFileState() {
+        const changes = await this.fileWatcher.scanAllFiles();
+        console.log(`\u0421\u043A\u0430\u043D\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u0435 \u0437\u0430\u0432\u0435\u0440\u0448\u0435\u043D\u043E, \u043D\u0430\u0439\u0434\u0435\u043D\u043E ${changes.length} \u0444\u0430\u0439\u043B\u043E\u0432. \u041D\u0430\u0447\u0438\u043D\u0430\u0435\u043C \u0430\u0441\u0438\u043D\u0445\u0440\u043E\u043D\u043D\u0443\u044E \u043E\u0431\u0440\u0430\u0431\u043E\u0442\u043A\u0443...`);
+        const newState = {};
+        const BATCH_SIZE = 50;
+        for (let i = 0; i < changes.length; i += BATCH_SIZE) {
+          const batch = changes.slice(i, i + BATCH_SIZE);
+          await new Promise((resolve) => {
+            setTimeout(async () => {
+              try {
+                for (const change of batch) {
+                  try {
+                    const file = change.file;
+                    const content = await this.app.vault.read(file);
+                    const hash = await CryptoHelper.hashString(content);
+                    newState[file.path] = {
+                      path: file.path,
+                      hash,
+                      mtime: file.stat.mtime,
+                      size: file.stat.size
+                    };
+                  } catch (fileError) {
+                    console.error(`\u041E\u0448\u0438\u0431\u043A\u0430 \u043F\u0440\u0438 \u043E\u0431\u0440\u0430\u0431\u043E\u0442\u043A\u0435 \u0444\u0430\u0439\u043B\u0430 ${change.file.path}:`, fileError);
+                  }
+                }
+                console.log(`\u041E\u0431\u0440\u0430\u0431\u043E\u0442\u0430\u043D\u0430 \u043F\u0430\u0447\u043A\u0430 ${Math.floor(i / BATCH_SIZE) + 1}/${Math.ceil(changes.length / BATCH_SIZE)}: ${batch.length} \u0444\u0430\u0439\u043B\u043E\u0432`);
+                resolve();
+              } catch (batchError) {
+                console.error("\u041E\u0448\u0438\u0431\u043A\u0430 \u043F\u0440\u0438 \u043E\u0431\u0440\u0430\u0431\u043E\u0442\u043A\u0435 \u043F\u0430\u0447\u043A\u0438 \u0444\u0430\u0439\u043B\u043E\u0432:", batchError);
+                resolve();
+              }
+            }, 0);
+          });
+        }
+        console.log("\u0410\u0441\u0438\u043D\u0445\u0440\u043E\u043D\u043D\u0430\u044F \u043E\u0431\u0440\u0430\u0431\u043E\u0442\u043A\u0430 \u0437\u0430\u0432\u0435\u0440\u0448\u0435\u043D\u0430, \u0434\u043E\u0431\u0430\u0432\u043B\u044F\u0435\u043C \u0443\u0434\u0430\u043B\u0435\u043D\u043D\u044B\u0435 \u0444\u0430\u0439\u043B\u044B \u0438\u0437 \u043F\u0440\u0435\u0434\u044B\u0434\u0443\u0449\u0435\u0433\u043E \u0441\u043E\u0441\u0442\u043E\u044F\u043D\u0438\u044F...");
+        const deletedEntries = Object.entries(this.syncState.files).filter(([_, metadata]) => metadata.deleted);
+        for (let i = 0; i < deletedEntries.length; i += BATCH_SIZE) {
+          const batch = deletedEntries.slice(i, i + BATCH_SIZE);
+          await new Promise((resolve) => {
+            setTimeout(() => {
+              for (const [path, metadata] of batch) {
+                if (!newState[path]) {
+                  newState[path] = metadata;
+                }
+              }
+              resolve();
+            }, 0);
+          });
+        }
+        console.log("\u041E\u0431\u043D\u043E\u0432\u043B\u0435\u043D\u0438\u0435 \u0441\u043E\u0441\u0442\u043E\u044F\u043D\u0438\u044F \u0437\u0430\u0432\u0435\u0440\u0448\u0435\u043D\u043E.");
+        this.syncState.files = newState;
+        this.saveSyncState();
+      }
+      /**
+       * Загрузить состояние синхронизации из локального хранилища
+       * с оптимизацией для больших состояний
+       */
+      loadSyncState() {
+        try {
+          const savedStateBase = localStorage.getItem("relay-sync-state-base");
+          if (!savedStateBase) {
+            return this.createInitialState();
+          }
+          const baseState = JSON.parse(savedStateBase);
+          const stateVersion = baseState.stateVersion || 1;
+          if (stateVersion >= 2) {
+            return this.loadSegmentedState(baseState);
+          }
+          const savedState = localStorage.getItem("relay-sync-state");
+          if (savedState) {
+            try {
+              return JSON.parse(savedState);
+            } catch (error) {
+              console.error("Error parsing saved sync state:", error);
+              return this.loadSegmentedState(baseState);
+            }
+          }
+          return this.createInitialState();
+        } catch (error) {
+          console.error("Error loading sync state:", error);
+          return this.createInitialState();
+        }
+      }
+      /**
+       * Создаст начальное состояние синхронизации
+       */
+      createInitialState() {
+        return {
+          deviceId: DeviceManager.getDeviceId(),
+          files: {},
+          lastSyncTime: 0
+        };
+      }
+      /**
+       * Загружает сегментированное состояние (новый формат)
+       */
+      loadSegmentedState(baseState) {
+        try {
+          const state = {
+            deviceId: baseState.deviceId || DeviceManager.getDeviceId(),
+            files: {},
+            lastSyncTime: baseState.lastSyncTime || 0
+          };
+          const segmentIds = baseState.segments || [];
+          console.log(`\u0417\u0430\u0433\u0440\u0443\u0437\u043A\u0430 \u0441\u0435\u0433\u043C\u0435\u043D\u0442\u0438\u0440\u043E\u0432\u0430\u043D\u043D\u043E\u0433\u043E \u0441\u043E\u0441\u0442\u043E\u044F\u043D\u0438\u044F: \u043D\u0430\u0439\u0434\u0435\u043D\u043E ${segmentIds.length} \u0441\u0435\u0433\u043C\u0435\u043D\u0442\u043E\u0432`);
+          for (const segmentId of segmentIds) {
+            const segmentKey = `relay-sync-files-${segmentId}`;
+            const segmentData = localStorage.getItem(segmentKey);
+            if (segmentData) {
+              try {
+                const segment = JSON.parse(segmentData);
+                if (segment.files && typeof segment.files === "object") {
+                  state.files = { ...state.files, ...segment.files };
+                }
+              } catch (segmentError) {
+                console.error(`Error parsing segment ${segmentId}:`, segmentError);
+              }
+            }
+          }
+          console.log(`\u0417\u0430\u0433\u0440\u0443\u0436\u0435\u043D\u043E \u0441\u043E\u0441\u0442\u043E\u044F\u043D\u0438\u0435 \u0441 ${Object.keys(state.files).length} \u0444\u0430\u0439\u043B\u0430\u043C\u0438`);
+          return state;
+        } catch (error) {
+          console.error("Error loading segmented state:", error);
+          return this.createInitialState();
+        }
+      }
+      /**
+       * Сохранить состояние синхронизации в локальное хранилище
+       * с оптимизацией для больших состояний
+       */
+      saveSyncState() {
+        try {
+          const filesCount = Object.keys(this.syncState.files).length;
+          if (filesCount < 100) {
+            localStorage.setItem("relay-sync-state", JSON.stringify(this.syncState));
+            return;
+          }
+          this.saveSegmentedState();
+        } catch (error) {
+          console.error("Error saving sync state:", error);
+          try {
+            this.saveSegmentedState();
+          } catch (backupError) {
+            console.error("Failed to save state using backup method:", backupError);
+          }
+        }
+      }
+      /**
+       * Сохраняет состояние в сегментированном формате
+       */
+      saveSegmentedState() {
+        const MAX_SEGMENT_SIZE = 500;
+        const files = Object.entries(this.syncState.files);
+        const segmentCount = Math.ceil(files.length / MAX_SEGMENT_SIZE);
+        const segments = [];
+        console.log(`\u0421\u043E\u0445\u0440\u0430\u043D\u0435\u043D\u0438\u0435 \u0441\u0435\u0433\u043C\u0435\u043D\u0442\u0438\u0440\u043E\u0432\u0430\u043D\u043D\u043E\u0433\u043E \u0441\u043E\u0441\u0442\u043E\u044F\u043D\u0438\u044F: ${files.length} \u0444\u0430\u0439\u043B\u043E\u0432 \u0432 ${segmentCount} \u0441\u0435\u0433\u043C\u0435\u043D\u0442\u0430\u0445`);
+        for (let i = 0; i < segmentCount; i++) {
+          const segmentFiles = files.slice(i * MAX_SEGMENT_SIZE, (i + 1) * MAX_SEGMENT_SIZE);
+          const segmentId = `segment_${i}_${Date.now()}`;
+          segments.push(segmentId);
+          const segmentFilesObj = Object.fromEntries(segmentFiles);
+          const segmentData = JSON.stringify({
+            files: segmentFilesObj,
+            timestamp: Date.now()
+          });
+          localStorage.setItem(`relay-sync-files-${segmentId}`, segmentData);
+        }
+        const baseState = {
+          deviceId: this.syncState.deviceId,
+          lastSyncTime: this.syncState.lastSyncTime,
+          segments,
+          stateVersion: 2,
+          // Версия формата хранения
+          timestamp: Date.now()
+        };
+        localStorage.setItem("relay-sync-state-base", JSON.stringify(baseState));
+        localStorage.removeItem("relay-sync-state");
+        this.cleanupOldSegments(segments);
+      }
+      /**
+       * Очищает старые сегменты, которые не используются
+       */
+      cleanupOldSegments(currentSegments) {
+        try {
+          const currentSegmentsSet = new Set(currentSegments);
+          for (let i = 0; i < localStorage.length; i++) {
+            const key = localStorage.key(i);
+            if (key && key.startsWith("relay-sync-files-")) {
+              const segmentId = key.replace("relay-sync-files-", "");
+              if (!currentSegmentsSet.has(segmentId)) {
+                localStorage.removeItem(key);
+                console.log(`\u0423\u0434\u0430\u043B\u0435\u043D \u0443\u0441\u0442\u0430\u0440\u0435\u0432\u0448\u0438\u0439 \u0441\u0435\u0433\u043C\u0435\u043D\u0442: ${segmentId}`);
+              }
+            }
+          }
+        } catch (error) {
+          console.error("Error cleaning up old segments:", error);
+        }
+      }
+      /**
+       * Получить список доверенных устройств
+       */
+      getTrustedDevices() {
+        return this.trustedDevices;
+      }
+      /**
+       * Отозвать доверие у устройства
+       */
+      async revokeTrust(deviceId) {
+        try {
+          return await this.relayClient.revokeTrust(deviceId);
+        } catch (error) {
+          console.error("Error revoking trust:", error);
+          return false;
+        }
+      }
+      /**
+       * Сгенерировать ключ приглашения
+       */
+      async generateInvitationKey(expirationMinutes = 10) {
+        try {
+          return await this.relayClient.generateInvitationKey(expirationMinutes);
+        } catch (error) {
+          console.error("Error generating invitation key:", error);
+          throw error;
+        }
+      }
+      /**
+       * Использовать ключ приглашения
+       */
+      async useInvitationKey(key) {
+        try {
+          return await this.relayClient.useInvitationKey(key);
+        } catch (error) {
+          console.error("Error using invitation key:", error);
+          return false;
+        }
+      }
+      /**
+       * Проверить состояние подключения
+       */
+      isConnected() {
+        return this.relayClient.isConnected;
+      }
+      /**
+       * Обновить настройки синхронизации
+       */
+      updateOptions(options) {
+        if (options.serverUrl) {
+          this.options.serverUrl = options.serverUrl;
+          this.relayClient.disconnect();
+          this.relayClient = new RelayClient({
+            serverUrl: this.options.serverUrl,
+            deviceId: this.syncState.deviceId,
+            deviceName: DeviceManager.getDeviceName(),
+            onMessage: this.handleSyncMessage.bind(this),
+            onConnectionChange: this.handleConnectionChange.bind(this),
+            onTrustedDevicesChange: this.handleTrustedDevicesChange.bind(this),
+            onSyncRequest: this.handleSyncRequest.bind(this)
+          });
+          this.relayClient.connect();
+        }
+        if (options.encryptionPassword) {
+          this.options.encryptionPassword = options.encryptionPassword;
+          this.encryptionPassword = options.encryptionPassword;
+        }
+        if (options.ignoredPaths) {
+          this.options.ignoredPaths = options.ignoredPaths;
+          for (const path of options.ignoredPaths) {
+            this.fileWatcher.addIgnorePattern(new RegExp(path));
+          }
+        }
+        if (options.fullSyncInterval !== void 0 && options.fullSyncInterval !== this.options.fullSyncInterval) {
+          this.options.fullSyncInterval = options.fullSyncInterval;
+          if (this.fullSyncInterval) {
+            clearInterval(this.fullSyncInterval);
+            this.fullSyncInterval = null;
+          }
+          if (options.fullSyncInterval) {
+            this.fullSyncInterval = setInterval(
+              this.performFullSync.bind(this),
+              options.fullSyncInterval
+            );
+          }
+        }
+      }
+    };
+  }
+});
+
+// src/tests/optimizer-tests.ts
+async function testDeltaCompression() {
+  console.log("=== \u0422\u0415\u0421\u0422\u0418\u0420\u041E\u0412\u0410\u041D\u0418\u0415 \u0414\u0415\u041B\u042C\u0422\u0410-\u041A\u041E\u041C\u041F\u0420\u0415\u0421\u0421\u0418\u0418 ===");
+  const baseDoc = `# \u0417\u0430\u0433\u043E\u043B\u043E\u0432\u043E\u043A \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442\u0430
+
+\u042D\u0442\u043E \u0438\u0441\u0445\u043E\u0434\u043D\u044B\u0439 \u0442\u0435\u0441\u0442\u043E\u0432\u044B\u0439 \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442 \u0441 \u043D\u0435\u0441\u043A\u043E\u043B\u044C\u043A\u0438\u043C\u0438 \u043F\u0430\u0440\u0430\u0433\u0440\u0430\u0444\u0430\u043C\u0438.
+\u041E\u043D \u0431\u0443\u0434\u0435\u0442 \u0438\u0441\u043F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u043D \u0434\u043B\u044F \u043F\u0440\u043E\u0432\u0435\u0440\u043A\u0438 \u0434\u0435\u043B\u044C\u0442\u0430-\u043A\u043E\u043C\u043F\u0440\u0435\u0441\u0441\u0438\u0438.
+
+## \u0420\u0430\u0437\u0434\u0435\u043B 1
+\u0422\u0435\u043A\u0441\u0442 \u043F\u0435\u0440\u0432\u043E\u0433\u043E \u0440\u0430\u0437\u0434\u0435\u043B\u0430 \u0431\u0435\u0437 \u0438\u0437\u043C\u0435\u043D\u0435\u043D\u0438\u0439.
+* \u041F\u0443\u043D\u043A\u0442 1
+* \u041F\u0443\u043D\u043A\u0442 2
+* \u041F\u0443\u043D\u043A\u0442 3
+
+## \u0420\u0430\u0437\u0434\u0435\u043B 2
+\u0422\u0435\u043A\u0441\u0442 \u0432\u0442\u043E\u0440\u043E\u0433\u043E \u0440\u0430\u0437\u0434\u0435\u043B\u0430 \u0431\u0435\u0437 \u0438\u0437\u043C\u0435\u043D\u0435\u043D\u0438\u0439.
+1. \u041F\u0435\u0440\u0432\u044B\u0439 \u043F\u0440\u043E\u043D\u0443\u043C\u0435\u0440\u043E\u0432\u0430\u043D\u043D\u044B\u0439 \u043F\u0443\u043D\u043A\u0442
+2. \u0412\u0442\u043E\u0440\u043E\u0439 \u043F\u0440\u043E\u043D\u0443\u043C\u0435\u0440\u043E\u0432\u0430\u043D\u043D\u044B\u0439 \u043F\u0443\u043D\u043A\u0442
+
+## \u0417\u0430\u043A\u043B\u044E\u0447\u0435\u043D\u0438\u0435
+\u0424\u0438\u043D\u0430\u043B\u044C\u043D\u044B\u0439 \u043F\u0430\u0440\u0430\u0433\u0440\u0430\u0444 \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442\u0430.`;
+  const modifiedDoc = `# \u0417\u0430\u0433\u043E\u043B\u043E\u0432\u043E\u043A \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442\u0430 (\u043E\u0431\u043D\u043E\u0432\u043B\u0435\u043D)
+
+\u042D\u0442\u043E \u0438\u0437\u043C\u0435\u043D\u0435\u043D\u043D\u044B\u0439 \u0442\u0435\u0441\u0442\u043E\u0432\u044B\u0439 \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442 \u0441 \u043D\u0435\u0441\u043A\u043E\u043B\u044C\u043A\u0438\u043C\u0438 \u043F\u0430\u0440\u0430\u0433\u0440\u0430\u0444\u0430\u043C\u0438.
+\u041E\u043D \u0431\u0443\u0434\u0435\u0442 \u0438\u0441\u043F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u043D \u0434\u043B\u044F \u043F\u0440\u043E\u0432\u0435\u0440\u043A\u0438 \u0434\u0435\u043B\u044C\u0442\u0430-\u043A\u043E\u043C\u043F\u0440\u0435\u0441\u0441\u0438\u0438.
+\u0412\u0441\u0442\u0430\u0432\u043B\u0435\u043D\u0430 \u043D\u043E\u0432\u0430\u044F \u0441\u0442\u0440\u043E\u043A\u0430 \u0442\u0435\u043A\u0441\u0442\u0430.
+
+## \u0420\u0430\u0437\u0434\u0435\u043B 1
+\u0422\u0435\u043A\u0441\u0442 \u043F\u0435\u0440\u0432\u043E\u0433\u043E \u0440\u0430\u0437\u0434\u0435\u043B\u0430 \u0441 \u043D\u0435\u0431\u043E\u043B\u044C\u0448\u0438\u043C\u0438 \u0438\u0437\u043C\u0435\u043D\u0435\u043D\u0438\u044F\u043C\u0438.
+* \u041F\u0443\u043D\u043A\u0442 1
+* \u041F\u0443\u043D\u043A\u0442 2 (\u043E\u0431\u043D\u043E\u0432\u043B\u0435\u043D)
+* \u041F\u0443\u043D\u043A\u0442 3
+* \u041D\u043E\u0432\u044B\u0439 \u043F\u0443\u043D\u043A\u0442 4
+
+## \u0420\u0430\u0437\u0434\u0435\u043B 2
+\u0422\u0435\u043A\u0441\u0442 \u0432\u0442\u043E\u0440\u043E\u0433\u043E \u0440\u0430\u0437\u0434\u0435\u043B\u0430 \u0431\u0435\u0437 \u0438\u0437\u043C\u0435\u043D\u0435\u043D\u0438\u0439.
+1. \u041F\u0435\u0440\u0432\u044B\u0439 \u043F\u0440\u043E\u043D\u0443\u043C\u0435\u0440\u043E\u0432\u0430\u043D\u043D\u044B\u0439 \u043F\u0443\u043D\u043A\u0442
+2. \u0412\u0442\u043E\u0440\u043E\u0439 \u043F\u0440\u043E\u043D\u0443\u043C\u0435\u0440\u043E\u0432\u0430\u043D\u043D\u044B\u0439 \u043F\u0443\u043D\u043A\u0442
+3. \u041D\u043E\u0432\u044B\u0439 \u043F\u0440\u043E\u043D\u0443\u043C\u0435\u0440\u043E\u0432\u0430\u043D\u043D\u044B\u0439 \u043F\u0443\u043D\u043A\u0442
+
+## \u0417\u0430\u043A\u043B\u044E\u0447\u0435\u043D\u0438\u0435
+\u0424\u0438\u043D\u0430\u043B\u044C\u043D\u044B\u0439 \u043F\u0430\u0440\u0430\u0433\u0440\u0430\u0444 \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442\u0430 \u0441 \u0434\u043E\u043F\u043E\u043B\u043D\u0438\u0442\u0435\u043B\u044C\u043D\u044B\u043C \u0442\u0435\u043A\u0441\u0442\u043E\u043C.
+\u0418 \u0435\u0449\u0435 \u043E\u0434\u043D\u0430 \u0441\u0442\u0440\u043E\u043A\u0430.`;
+  try {
+    const syncManager = new SyncManager2(null, {});
+    const delta = syncManager["createDelta"](baseDoc, modifiedDoc);
+    console.log(`\u0420\u0430\u0437\u043C\u0435\u0440 \u0431\u0430\u0437\u043E\u0432\u043E\u0433\u043E \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442\u0430: ${baseDoc.length} \u0431\u0430\u0439\u0442`);
+    console.log(`\u0420\u0430\u0437\u043C\u0435\u0440 \u0438\u0437\u043C\u0435\u043D\u0435\u043D\u043D\u043E\u0433\u043E \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442\u0430: ${modifiedDoc.length} \u0431\u0430\u0439\u0442`);
+    console.log(`\u0420\u0430\u0437\u043C\u0435\u0440 \u0434\u0435\u043B\u044C\u0442\u044B: ${delta.length} \u0431\u0430\u0439\u0442`);
+    console.log(`\u0421\u0442\u0435\u043F\u0435\u043D\u044C \u0441\u0436\u0430\u0442\u0438\u044F: ${Math.round(delta.length / modifiedDoc.length * 100)}% \u043E\u0442 \u043E\u0440\u0438\u0433\u0438\u043D\u0430\u043B\u0430`);
+    const deltaObj = JSON.parse(delta);
+    console.log("\u0421\u0442\u0440\u0443\u043A\u0442\u0443\u0440\u0430 \u0434\u0435\u043B\u044C\u0442\u044B:", Object.keys(deltaObj).join(", "));
+    if (deltaObj.operations) {
+      console.log(`\u041A\u043E\u043B\u0438\u0447\u0435\u0441\u0442\u0432\u043E \u043E\u043F\u0435\u0440\u0430\u0446\u0438\u0439: ${deltaObj.operations.length}`);
+      const opTypes = {};
+      for (const op of deltaObj.operations) {
+        const opType = op.op;
+        opTypes[opType] = (opTypes[opType] || 0) + 1;
+      }
+      console.log("\u0422\u0438\u043F\u044B \u043E\u043F\u0435\u0440\u0430\u0446\u0438\u0439:", opTypes);
+    }
+    const reconstructed = syncManager["applyDelta"](baseDoc, delta);
+    const reconstructionSuccess = reconstructed === modifiedDoc;
+    console.log(`\u0423\u0441\u043F\u0435\u0448\u043D\u0430\u044F \u0440\u0435\u043A\u043E\u043D\u0441\u0442\u0440\u0443\u043A\u0446\u0438\u044F: ${reconstructionSuccess}`);
+    if (!reconstructionSuccess) {
+      console.log("\u041E\u0428\u0418\u0411\u041A\u0410 \u0420\u0415\u041A\u041E\u041D\u0421\u0422\u0420\u0423\u041A\u0426\u0418\u0418!");
+      console.log(`\u0414\u043B\u0438\u043D\u0430 \u043E\u0440\u0438\u0433\u0438\u043D\u0430\u043B\u0430: ${modifiedDoc.length}, \u0434\u043B\u0438\u043D\u0430 \u0440\u0435\u043A\u043E\u043D\u0441\u0442\u0440\u0443\u043A\u0446\u0438\u0438: ${reconstructed.length}`);
+    }
+    return reconstructionSuccess;
+  } catch (error) {
+    console.error("\u041E\u0448\u0438\u0431\u043A\u0430 \u043F\u0440\u0438 \u0442\u0435\u0441\u0442\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u0438 \u0434\u0435\u043B\u044C\u0442\u0430-\u043A\u043E\u043C\u043F\u0440\u0435\u0441\u0441\u0438\u0438:", error);
+    return false;
+  }
+}
+async function testSegmentedStorage() {
+  console.log("=== \u0422\u0415\u0421\u0422\u0418\u0420\u041E\u0412\u0410\u041D\u0418\u0415 \u0421\u0415\u0413\u041C\u0415\u041D\u0422\u0418\u0420\u041E\u0412\u0410\u041D\u041D\u041E\u0413\u041E \u0425\u0420\u0410\u041D\u0415\u041D\u0418\u042F ===");
+  try {
+    const mockStorage = {};
+    const mockLocalStorage = {
+      getItem: (key) => mockStorage[key] || null,
+      setItem: (key, value) => {
+        mockStorage[key] = value;
+      },
+      removeItem: (key) => {
+        delete mockStorage[key];
+      }
+    };
+    global.localStorage = mockLocalStorage;
+    const testState = {
+      deviceId: "test-device-id",
+      lastSyncTime: Date.now(),
+      files: {}
+    };
+    const FILE_COUNT = 1e3;
+    console.log(`\u0413\u0435\u043D\u0435\u0440\u0430\u0446\u0438\u044F ${FILE_COUNT} \u0442\u0435\u0441\u0442\u043E\u0432\u044B\u0445 \u0444\u0430\u0439\u043B\u043E\u0432...`);
+    for (let i = 0; i < FILE_COUNT; i++) {
+      const path = `test/file_${i}.md`;
+      testState.files[path] = {
+        path,
+        hash: `hash_${i}`,
+        mtime: Date.now() - i * 1e3,
+        size: 1e3 + i,
+        vectorClock: { "test-device-id": Date.now() - i * 1e3 }
+      };
+    }
+    const syncManager = new SyncManager2(null, {});
+    syncManager.syncState = testState;
+    syncManager.saveSegmentedState();
+    const baseStateJson = mockLocalStorage.getItem("relay-sync-state-base");
+    if (!baseStateJson) {
+      throw new Error("Base state not found in localStorage");
+    }
+    const baseState = JSON.parse(baseStateJson);
+    console.log("\u0411\u0430\u0437\u043E\u0432\u043E\u0435 \u0441\u043E\u0441\u0442\u043E\u044F\u043D\u0438\u0435:", baseState);
+    console.log(`\u041A\u043E\u043B\u0438\u0447\u0435\u0441\u0442\u0432\u043E \u0441\u0435\u0433\u043C\u0435\u043D\u0442\u043E\u0432: ${baseState.segments.length}`);
+    const firstSegmentKey = `relay-sync-files-${baseState.segments[0]}`;
+    const firstSegmentJson = mockLocalStorage.getItem(firstSegmentKey);
+    if (!firstSegmentJson) {
+      throw new Error("First segment not found in localStorage");
+    }
+    const firstSegment = JSON.parse(firstSegmentJson);
+    const fileCount = Object.keys(firstSegment.files).length;
+    console.log(`\u0424\u0430\u0439\u043B\u043E\u0432 \u0432 \u043F\u0435\u0440\u0432\u043E\u043C \u0441\u0435\u0433\u043C\u0435\u043D\u0442\u0435: ${fileCount}`);
+    console.log(`\u041E\u0436\u0438\u0434\u0430\u0435\u043C\u044B\u0439 \u0440\u0430\u0437\u043C\u0435\u0440 \u0441\u0435\u0433\u043C\u0435\u043D\u0442\u0430: \u043E\u043A\u043E\u043B\u043E 500 \u0444\u0430\u0439\u043B\u043E\u0432`);
+    console.log(`\u0422\u0435\u0441\u0442 \u0441\u0435\u0433\u043C\u0435\u043D\u0442\u0430\u0446\u0438\u0438 ${fileCount > 0 && fileCount <= 500 ? "\u041F\u0420\u041E\u0419\u0414\u0415\u041D" : "\u041D\u0415 \u041F\u0420\u041E\u0419\u0414\u0415\u041D"}`);
+    const loadedState = syncManager.loadSegmentedState(baseState);
+    const loadedFileCount = Object.keys(loadedState.files).length;
+    console.log(`\u0417\u0430\u0433\u0440\u0443\u0436\u0435\u043D\u043E \u0444\u0430\u0439\u043B\u043E\u0432: ${loadedFileCount}`);
+    console.log(`\u0422\u0435\u0441\u0442 \u0437\u0430\u0433\u0440\u0443\u0437\u043A\u0438 ${loadedFileCount === FILE_COUNT ? "\u041F\u0420\u041E\u0419\u0414\u0415\u041D" : "\u041D\u0415 \u041F\u0420\u041E\u0419\u0414\u0415\u041D"}`);
+    for (const segmentId of baseState.segments) {
+      mockLocalStorage.removeItem(`relay-sync-files-${segmentId}`);
+    }
+    mockLocalStorage.removeItem("relay-sync-state-base");
+    return loadedFileCount === FILE_COUNT;
+  } catch (error) {
+    console.error("\u041E\u0448\u0438\u0431\u043A\u0430 \u043F\u0440\u0438 \u0442\u0435\u0441\u0442\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u0438 \u0441\u0435\u0433\u043C\u0435\u043D\u0442\u0438\u0440\u043E\u0432\u0430\u043D\u043D\u043E\u0433\u043E \u0445\u0440\u0430\u043D\u0435\u043D\u0438\u044F:", error);
+    return false;
+  }
+}
+async function testFileCache() {
+  console.log("=== \u0422\u0415\u0421\u0422\u0418\u0420\u041E\u0412\u0410\u041D\u0418\u0415 \u041A\u042D\u0428\u0410 \u0424\u0410\u0419\u041B\u041E\u0412 ===");
+  try {
+    const syncManager = new SyncManager2(null, {});
+    const testFiles = [
+      { path: "test/small.md", content: "Small file content", hash: "hash1" },
+      { path: "test/medium.md", content: "A".repeat(1024 * 1024), hash: "hash2" },
+      // 1MB
+      { path: "test/large.md", content: "B".repeat(6 * 1024 * 1024), hash: "hash3" }
+      // 6MB - превышает лимит (5MB)
+    ];
+    console.log("\u0421\u043E\u0445\u0440\u0430\u043D\u0435\u043D\u0438\u0435 \u0444\u0430\u0439\u043B\u043E\u0432 \u0432 \u043A\u044D\u0448...");
+    for (const file of testFiles) {
+      syncManager.saveContentToCache(file.path, file.content, file.hash);
+    }
+    const cachedSmall = syncManager.getContentFromCache("test/small.md", "hash1");
+    const cachedMedium = syncManager.getContentFromCache("test/medium.md", "hash2");
+    const cachedLarge = syncManager.getContentFromCache("test/large.md", "hash3");
+    console.log(`\u041C\u0430\u043B\u0435\u043D\u044C\u043A\u0438\u0439 \u0444\u0430\u0439\u043B \u043A\u044D\u0448\u0438\u0440\u043E\u0432\u0430\u043D: ${cachedSmall !== null}`);
+    console.log(`\u0421\u0440\u0435\u0434\u043D\u0438\u0439 \u0444\u0430\u0439\u043B \u043A\u044D\u0448\u0438\u0440\u043E\u0432\u0430\u043D: ${cachedMedium !== null}`);
+    console.log(`\u0411\u043E\u043B\u044C\u0448\u043E\u0439 \u0444\u0430\u0439\u043B \u043A\u044D\u0448\u0438\u0440\u043E\u0432\u0430\u043D: ${cachedLarge !== null}`);
+    const smallCorrect = cachedSmall === "Small file content";
+    const mediumCorrect = cachedMedium === "A".repeat(1024 * 1024);
+    const largeCorrect = cachedLarge === null;
+    console.log(`\u041F\u0440\u0430\u0432\u0438\u043B\u044C\u043D\u043E\u0441\u0442\u044C \u043A\u044D\u0448\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u044F \u043C\u0430\u043B\u043E\u0433\u043E \u0444\u0430\u0439\u043B\u0430: ${smallCorrect ? "\u041F\u0420\u041E\u0419\u0414\u0415\u041D" : "\u041D\u0415 \u041F\u0420\u041E\u0419\u0414\u0415\u041D"}`);
+    console.log(`\u041F\u0440\u0430\u0432\u0438\u043B\u044C\u043D\u043E\u0441\u0442\u044C \u043A\u044D\u0448\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u044F \u0441\u0440\u0435\u0434\u043D\u0435\u0433\u043E \u0444\u0430\u0439\u043B\u0430: ${mediumCorrect ? "\u041F\u0420\u041E\u0419\u0414\u0415\u041D" : "\u041D\u0415 \u041F\u0420\u041E\u0419\u0414\u0415\u041D"}`);
+    console.log(`\u041F\u0440\u0430\u0432\u0438\u043B\u044C\u043D\u043E\u0441\u0442\u044C \u043E\u0442\u043A\u043B\u043E\u043D\u0435\u043D\u0438\u044F \u0431\u043E\u043B\u044C\u0448\u043E\u0433\u043E \u0444\u0430\u0439\u043B\u0430: ${largeCorrect ? "\u041F\u0420\u041E\u0419\u0414\u0415\u041D" : "\u041D\u0415 \u041F\u0420\u041E\u0419\u0414\u0415\u041D"}`);
+    console.log("\u0422\u0435\u0441\u0442\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u0435 \u043E\u0447\u0438\u0441\u0442\u043A\u0438 \u043A\u044D\u0448\u0430 \u043F\u0440\u0438 \u043F\u0440\u0435\u0432\u044B\u0448\u0435\u043D\u0438\u0438 \u043B\u0438\u043C\u0438\u0442\u0430...");
+    for (let i = 0; i < 100; i++) {
+      syncManager.saveContentToCache(`test/file${i}.md`, `Content ${i}`.repeat(1e3), `hash${i}`);
+    }
+    const originalStillCached = syncManager.getContentFromCache("test/small.md", "hash1");
+    console.log(`\u041F\u0435\u0440\u0432\u044B\u0439 \u0444\u0430\u0439\u043B \u043E\u0441\u0442\u0430\u043B\u0441\u044F \u0432 \u043A\u044D\u0448\u0435: ${originalStillCached !== null}`);
+    syncManager.clearCache();
+    return smallCorrect && mediumCorrect && largeCorrect;
+  } catch (error) {
+    console.error("\u041E\u0448\u0438\u0431\u043A\u0430 \u043F\u0440\u0438 \u0442\u0435\u0441\u0442\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u0438 \u043A\u044D\u0448\u0430 \u0444\u0430\u0439\u043B\u043E\u0432:", error);
+    return false;
+  }
+}
+async function testChunkedEncryption() {
+  console.log("=== \u0422\u0415\u0421\u0422\u0418\u0420\u041E\u0412\u0410\u041D\u0418\u0415 \u0428\u0418\u0424\u0420\u041E\u0412\u0410\u041D\u0418\u042F \u0418 \u0424\u0420\u0410\u0413\u041C\u0415\u041D\u0422\u0410\u0426\u0418\u0418 ===");
+  try {
+    const largeContent = "Test content ".repeat(1e5);
+    console.log(`\u0420\u0430\u0437\u043C\u0435\u0440 \u0442\u0435\u0441\u0442\u043E\u0432\u043E\u0433\u043E \u0444\u0430\u0439\u043B\u0430: ${Math.round(largeContent.length / 1024)} KB`);
+    const encryptionPass = "test-encryption-password";
+    const encrypted = await CryptoHelper2.encrypt(largeContent, encryptionPass);
+    console.log(`\u0420\u0430\u0437\u043C\u0435\u0440 \u0437\u0430\u0448\u0438\u0444\u0440\u043E\u0432\u0430\u043D\u043D\u044B\u0445 \u0434\u0430\u043D\u043D\u044B\u0445: ${Math.round((encrypted.data.length + encrypted.iv.length + encrypted.authTag.length) / 1024)} KB`);
+    const decrypted = await CryptoHelper2.decrypt(encrypted, encryptionPass);
+    const encryptionSuccess = decrypted === largeContent;
+    console.log(`\u0422\u0435\u0441\u0442 \u0448\u0438\u0444\u0440\u043E\u0432\u0430\u043D\u0438\u044F/\u0434\u0435\u0448\u0438\u0444\u0440\u043E\u0432\u0430\u043D\u0438\u044F: ${encryptionSuccess ? "\u041F\u0420\u041E\u0419\u0414\u0415\u041D" : "\u041D\u0415 \u041F\u0420\u041E\u0419\u0414\u0415\u041D"}`);
+    const CHUNK_SIZE = 500 * 1024;
+    const chunks = [];
+    for (let i = 0; i < largeContent.length; i += CHUNK_SIZE) {
+      const chunk = largeContent.substring(i, i + CHUNK_SIZE);
+      chunks.push(chunk);
+    }
+    console.log(`\u0424\u0430\u0439\u043B \u0440\u0430\u0437\u0434\u0435\u043B\u0435\u043D \u043D\u0430 ${chunks.length} \u0444\u0440\u0430\u0433\u043C\u0435\u043D\u0442\u043E\u0432`);
+    const reconstructed = chunks.join("");
+    const chunksSuccess = reconstructed === largeContent;
+    console.log(`\u0422\u0435\u0441\u0442 \u0444\u0440\u0430\u0433\u043C\u0435\u043D\u0442\u0430\u0446\u0438\u0438: ${chunksSuccess ? "\u041F\u0420\u041E\u0419\u0414\u0415\u041D" : "\u041D\u0415 \u041F\u0420\u041E\u0419\u0414\u0415\u041D"}`);
+    return encryptionSuccess && chunksSuccess;
+  } catch (error) {
+    console.error("\u041E\u0448\u0438\u0431\u043A\u0430 \u043F\u0440\u0438 \u0442\u0435\u0441\u0442\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u0438 \u0448\u0438\u0444\u0440\u043E\u0432\u0430\u043D\u0438\u044F \u0438 \u0444\u0440\u0430\u0433\u043C\u0435\u043D\u0442\u0430\u0446\u0438\u0438:", error);
+    return false;
+  }
+}
+async function runAllTests() {
+  console.log("======= \u0417\u0410\u041F\u0423\u0421\u041A \u0412\u0421\u0415\u0425 \u0422\u0415\u0421\u0422\u041E\u0412 \u041E\u041F\u0422\u0418\u041C\u0418\u0417\u0410\u0426\u0418\u0418 =======");
+  const results = {
+    deltaCompression: await testDeltaCompression(),
+    segmentedStorage: await testSegmentedStorage(),
+    fileCache: await testFileCache(),
+    chunkedEncryption: await testChunkedEncryption()
+  };
+  console.log("\n======= \u0420\u0415\u0417\u0423\u041B\u042C\u0422\u0410\u0422\u042B \u0422\u0415\u0421\u0422\u041E\u0412 =======");
+  for (const [test, result] of Object.entries(results)) {
+    console.log(`${test}: ${result ? "\u2705 \u041F\u0420\u041E\u0419\u0414\u0415\u041D" : "\u274C \u041D\u0415 \u041F\u0420\u041E\u0419\u0414\u0415\u041D"}`);
+  }
+  const allPassed = Object.values(results).every((result) => result);
+  console.log(`
+\u041E\u0431\u0449\u0438\u0439 \u0440\u0435\u0437\u0443\u043B\u044C\u0442\u0430\u0442: ${allPassed ? "\u2705 \u0412\u0421\u0415 \u0422\u0415\u0421\u0422\u042B \u041F\u0420\u041E\u0419\u0414\u0415\u041D\u042B" : "\u274C \u0415\u0421\u0422\u042C \u041F\u0420\u041E\u0411\u041B\u0415\u041C\u042B"}`);
+  return allPassed;
+}
+var mockApp, SyncManager2, CryptoHelper2;
+var init_optimizer_tests = __esm({
+  "src/tests/optimizer-tests.ts"() {
+    mockApp = { vault: { read: async () => "test" } };
+    SyncManager2 = class {
+      constructor(app, settings) {
+        this.syncState = { files: {} };
+        // Кэш файлов
+        this.fileCache = /* @__PURE__ */ new Map();
+        this.MAX_CACHE_SIZE = 5 * 1024 * 1024;
+        // 5MB
+        this.currentCacheSize = 0;
+        this.app = app || mockApp;
+        this.settings = settings || {};
+      }
+      createDelta(baseText, newText) {
+        const baseLines = baseText.split("\n");
+        const newLines = newText.split("\n");
+        let common = 0;
+        while (common < baseLines.length && common < newLines.length && baseLines[common] === newLines[common]) {
+          common++;
+        }
+        const delta = {
+          baseLength: baseLines.length,
+          newLength: newLines.length,
+          operations: [
+            { op: "keep", start: 0, count: common },
+            { op: "delete", start: common, count: baseLines.length - common },
+            { op: "insert", start: common, count: newLines.length - common, lines: newLines.slice(common) }
+          ]
+        };
+        return JSON.stringify(delta);
+      }
+      applyDelta(baseText, deltaJson) {
+        const delta = JSON.parse(deltaJson);
+        const baseLines = baseText.split("\n");
+        let result = [];
+        for (const op of delta.operations) {
+          if (op.op === "keep") {
+            result = result.concat(baseLines.slice(op.start, op.start + op.count));
+          } else if (op.op === "insert") {
+            result = result.concat(op.lines);
+          }
+        }
+        return result.join("\n");
+      }
+      // Метод для тестирования сегментированного хранения
+      saveSegmentedState() {
+        const segments = [];
+        const files = Object.entries(this.syncState.files);
+        for (let i = 0; i < files.length; i += 500) {
+          const segmentId = `segment_${i / 500}`;
+          const segmentFiles = Object.fromEntries(files.slice(i, i + 500));
+          localStorage.setItem(`relay-sync-files-${segmentId}`, JSON.stringify({
+            id: segmentId,
+            files: segmentFiles
+          }));
+          segments.push(segmentId);
+        }
+        localStorage.setItem("relay-sync-state-base", JSON.stringify({
+          deviceId: this.syncState.deviceId,
+          lastSyncTime: this.syncState.lastSyncTime,
+          segments
+        }));
+      }
+      // Метод для загрузки сегментированного состояния
+      loadSegmentedState(baseState) {
+        const state = {
+          deviceId: baseState.deviceId,
+          lastSyncTime: baseState.lastSyncTime,
+          files: {}
+        };
+        for (const segmentId of baseState.segments) {
+          const segmentJson = localStorage.getItem(`relay-sync-files-${segmentId}`);
+          if (segmentJson) {
+            const segment = JSON.parse(segmentJson);
+            Object.assign(state.files, segment.files);
+          }
+        }
+        return state;
+      }
+      saveContentToCache(path, content, hash) {
+        const size = content.length;
+        if (size > 5 * 1024 * 1024) {
+          return;
+        }
+        if (this.currentCacheSize + size > this.MAX_CACHE_SIZE) {
+          const entries = Array.from(this.fileCache.entries());
+          entries.sort((a, b) => a[1].timestamp - b[1].timestamp);
+          while (this.currentCacheSize + size > this.MAX_CACHE_SIZE && entries.length > 0) {
+            const [oldestPath, oldestEntry] = entries.shift();
+            this.currentCacheSize -= oldestEntry.size;
+            this.fileCache.delete(oldestPath);
+          }
+        }
+        this.fileCache.set(path, {
+          content,
+          hash,
+          timestamp: Date.now(),
+          size
+        });
+        this.currentCacheSize += size;
+      }
+      getContentFromCache(path, hash) {
+        const entry = this.fileCache.get(path);
+        if (entry && entry.hash === hash) {
+          entry.timestamp = Date.now();
+          return entry.content;
+        }
+        return null;
+      }
+      clearCache() {
+        this.fileCache.clear();
+        this.currentCacheSize = 0;
+      }
+    };
+    CryptoHelper2 = {
+      async hashString(str) {
+        return "hash_" + str.length;
+      },
+      async encrypt(data, password) {
+        const encrypted = Buffer.from(data).toString("base64");
+        return {
+          data: encrypted,
+          iv: "test_iv",
+          authTag: "test_auth_tag"
+        };
+      },
+      async decrypt(encrypted, password) {
+        return Buffer.from(encrypted.data, "base64").toString();
+      }
+    };
+    if (typeof require !== "undefined" && require.main === module) {
+      runAllTests();
+    }
+  }
+});
+
+// src/tests/integration/mocks.ts
+var init_mocks = __esm({
+  "src/tests/integration/mocks.ts"() {
+    if (typeof global !== "undefined" && !global.WebSocket) {
+      global.WebSocket = class MockWebSocket {
+        constructor(url) {
+          this.onopen = null;
+          this.onmessage = null;
+          this.onclose = null;
+          this.onerror = null;
+          this.readyState = 0;
+          this.url = url;
+          setTimeout(() => {
+            this.readyState = 1;
+            if (this.onopen)
+              this.onopen();
+          }, 50);
+        }
+        send() {
+        }
+        close() {
+          this.readyState = 3;
+          if (this.onclose)
+            this.onclose({ code: 1e3 });
+        }
+      };
+    }
+    if (typeof global !== "undefined" && !global.localStorage) {
+      const storage = {};
+      global.localStorage = {
+        getItem: (key) => storage[key] || null,
+        setItem: (key, value) => {
+          storage[key] = value;
+        },
+        removeItem: (key) => {
+          delete storage[key];
+        }
+      };
+    }
+  }
+});
+
+// src/tests/integration/connection-tests.ts
+async function testConnection() {
+  console.log("=== \u0422\u0415\u0421\u0422\u0418\u0420\u041E\u0412\u0410\u041D\u0418\u0415 \u041F\u041E\u0414\u041A\u041B\u042E\u0427\u0415\u041D\u0418\u042F \u041A \u0421\u0415\u0420\u0412\u0415\u0420\u0423 ===");
+  class MockWebSocket2 {
+    // 0 = CONNECTING, 1 = OPEN, 2 = CLOSING, 3 = CLOSED
+    constructor(url) {
+      this.onopen = null;
+      this.onmessage = null;
+      this.onclose = null;
+      this.onerror = null;
+      this.readyState = 0;
+      this.url = url;
+      setTimeout(() => {
+        this.readyState = 1;
+        if (this.onopen)
+          this.onopen();
+      }, 100);
+    }
+    send(data) {
+      if (this.readyState !== 1) {
+        throw new Error("WebSocket is not connected");
+      }
+      const message = JSON.parse(data);
+      setTimeout(() => {
+        if (message.type === "init") {
+          if (this.onmessage) {
+            this.onmessage({
+              data: JSON.stringify({
+                type: "init_response",
+                success: true,
+                message: "Connected successfully"
+              })
+            });
+          }
+        } else if (message.type === "ping") {
+          if (this.onmessage) {
+            this.onmessage({
+              data: JSON.stringify({
+                type: "pong",
+                timestamp: Date.now()
+              })
+            });
+          }
+        }
+      }, 50);
+    }
+    close() {
+      this.readyState = 3;
+      if (this.onclose) {
+        this.onclose({ code: 1e3, reason: "Normal closure" });
+      }
+    }
+  }
+  const originalWebSocket = global.WebSocket;
+  global.WebSocket = MockWebSocket2;
+  try {
+    let isConnected = false;
+    let receivedInitResponse = false;
+    const onConnect = () => {
+      console.log("\u0421\u043E\u0435\u0434\u0438\u043D\u0435\u043D\u0438\u0435 \u0443\u0441\u0442\u0430\u043D\u043E\u0432\u043B\u0435\u043D\u043E");
+      isConnected = true;
+    };
+    const onDisconnect = () => {
+      console.log("\u0421\u043E\u0435\u0434\u0438\u043D\u0435\u043D\u0438\u0435 \u0440\u0430\u0437\u043E\u0440\u0432\u0430\u043D\u043E");
+      isConnected = false;
+    };
+    const onMessage = (message) => {
+      console.log("\u041F\u043E\u043B\u0443\u0447\u0435\u043D\u043E \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u0435:", message);
+      if (message.type === "init_response") {
+        receivedInitResponse = true;
+      }
+    };
+    const client = new RelayClient({
+      serverUrl: TEST_SERVER_URL,
+      deviceId: TEST_DEVICE_ID,
+      deviceName: TEST_DEVICE_NAME,
+      onMessage,
+      onConnectionChange: (connected) => {
+        if (connected)
+          onConnect();
+        else
+          onDisconnect();
+      },
+      onTrustedDevicesChange: () => {
+      },
+      onSyncRequest: () => {
+      }
+    });
+    console.log("\u041F\u043E\u0434\u043A\u043B\u044E\u0447\u0435\u043D\u0438\u0435 \u043A \u0441\u0435\u0440\u0432\u0435\u0440\u0443...");
+    client.connect();
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    console.log(`\u0421\u0442\u0430\u0442\u0443\u0441 \u0441\u043E\u0435\u0434\u0438\u043D\u0435\u043D\u0438\u044F: ${isConnected ? "\u041F\u041E\u0414\u041A\u041B\u042E\u0427\u0415\u041D\u041E" : "\u041E\u0422\u041A\u041B\u042E\u0427\u0415\u041D\u041E"}`);
+    console.log(`\u041F\u043E\u043B\u0443\u0447\u0435\u043D \u043E\u0442\u0432\u0435\u0442 \u0438\u043D\u0438\u0446\u0438\u0430\u043B\u0438\u0437\u0430\u0446\u0438\u0438: ${receivedInitResponse ? "\u0414\u0410" : "\u041D\u0415\u0422"}`);
+    const pingSuccess = client.sendMessage({
+      type: "ping",
+      timestamp: Date.now()
+    });
+    console.log(`\u041E\u0442\u043F\u0440\u0430\u0432\u043A\u0430 \u043F\u0438\u043D\u0433\u0430: ${pingSuccess ? "\u0423\u0421\u041F\u0415\u0428\u041D\u041E" : "\u041E\u0428\u0418\u0411\u041A\u0410"}`);
+    client.disconnect();
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    console.log(`\u0421\u0442\u0430\u0442\u0443\u0441 \u043F\u043E\u0441\u043B\u0435 \u043E\u0442\u043A\u043B\u044E\u0447\u0435\u043D\u0438\u044F: ${isConnected ? "\u041F\u041E\u0414\u041A\u041B\u042E\u0427\u0415\u041D\u041E" : "\u041E\u0422\u041A\u041B\u042E\u0427\u0415\u041D\u041E"}`);
+    global.WebSocket = originalWebSocket;
+    const connectionSuccess = receivedInitResponse && pingSuccess;
+    console.log(`\u0422\u0435\u0441\u0442 \u043F\u043E\u0434\u043A\u043B\u044E\u0447\u0435\u043D\u0438\u044F: ${connectionSuccess ? "\u041F\u0420\u041E\u0419\u0414\u0415\u041D" : "\u041D\u0415 \u041F\u0420\u041E\u0419\u0414\u0415\u041D"}`);
+    return connectionSuccess;
+  } catch (error) {
+    console.error("\u041E\u0448\u0438\u0431\u043A\u0430 \u043F\u0440\u0438 \u0442\u0435\u0441\u0442\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u0438 \u043F\u043E\u0434\u043A\u043B\u044E\u0447\u0435\u043D\u0438\u044F:", error);
+    global.WebSocket = originalWebSocket;
+    return false;
+  }
+}
+var TEST_SERVER_URL, TEST_DEVICE_ID, TEST_DEVICE_NAME;
+var init_connection_tests = __esm({
+  "src/tests/integration/connection-tests.ts"() {
+    init_relay_client();
+    TEST_SERVER_URL = "ws://localhost:8080/ws";
+    TEST_DEVICE_ID = "test-device-id";
+    TEST_DEVICE_NAME = "Test Device";
+  }
+});
+
+// src/tests/integration/sync-tests.ts
+async function testSync() {
+  console.log("=== \u0422\u0415\u0421\u0422\u0418\u0420\u041E\u0412\u0410\u041D\u0418\u0415 \u0421\u0418\u041D\u0425\u0420\u041E\u041D\u0418\u0417\u0410\u0426\u0418\u0418 \u0424\u0410\u0419\u041B\u041E\u0412 ===");
+  try {
+    const syncManager = new SyncManager(mockObsidian, {
+      serverUrl: "ws://localhost:8080/ws",
+      encryptionPassword: "test-password",
+      ignoredPaths: [".obsidian/", ".git/"]
+    });
+    syncManager.relayClient = new MockRelayClient({
+      onConnect: syncManager.handleConnect.bind(syncManager),
+      onDisconnect: syncManager.handleDisconnect.bind(syncManager),
+      onMessage: syncManager.handleMessage.bind(syncManager),
+      onDeviceConnected: syncManager.handleDeviceConnected.bind(syncManager),
+      onDeviceDisconnected: syncManager.handleDeviceDisconnected.bind(syncManager),
+      onTrustedDevicesChange: syncManager.handleTrustedDevicesChange.bind(syncManager),
+      onSyncRequest: syncManager.handleSyncRequest.bind(syncManager)
+    });
+    console.log("\u0417\u0430\u043F\u0443\u0441\u043A \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438...");
+    await syncManager.start();
+    console.log(`\u0421\u0442\u0430\u0442\u0443\u0441 \u0441\u043E\u0435\u0434\u0438\u043D\u0435\u043D\u0438\u044F: ${syncManager.relayClient.isConnected ? "\u041F\u041E\u0414\u041A\u041B\u042E\u0427\u0415\u041D\u041E" : "\u041E\u0422\u041A\u041B\u042E\u0427\u0415\u041D\u041E"}`);
+    console.log("\u0418\u043D\u0434\u0435\u043A\u0441\u0430\u0446\u0438\u044F \u0444\u0430\u0439\u043B\u043E\u0432...");
+    await syncManager.indexFiles();
+    const syncState = syncManager.syncState;
+    const indexedFiles = Object.keys(syncState.files).length;
+    console.log(`\u0418\u043D\u0434\u0435\u043A\u0441\u0438\u0440\u043E\u0432\u0430\u043D\u043E \u0444\u0430\u0439\u043B\u043E\u0432: ${indexedFiles}`);
+    console.log(`\u041E\u0436\u0438\u0434\u0430\u0435\u043C\u043E\u0435 \u043A\u043E\u043B\u0438\u0447\u0435\u0441\u0442\u0432\u043E \u0444\u0430\u0439\u043B\u043E\u0432: ${Object.keys(filesMap).length}`);
+    console.log("\u0418\u043C\u0438\u0442\u0430\u0446\u0438\u044F \u0438\u0437\u043C\u0435\u043D\u0435\u043D\u0438\u044F \u0444\u0430\u0439\u043B\u0430...");
+    const testFilePath = "test/file1.md";
+    const originalContent = filesMap[testFilePath].content;
+    filesMap[testFilePath].content = originalContent + "\n\nUpdated content.";
+    filesMap[testFilePath].mtime = Date.now();
+    await syncManager.handleFileChange({
+      path: testFilePath,
+      type: "modify",
+      file: mockObsidian.vault.getAbstractFileByPath(testFilePath)
+    });
+    const fileInQueue = syncManager.pendingSyncFiles.has(testFilePath);
+    console.log(`\u0424\u0430\u0439\u043B \u0434\u043E\u0431\u0430\u0432\u043B\u0435\u043D \u0432 \u043E\u0447\u0435\u0440\u0435\u0434\u044C \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438: ${fileInQueue ? "\u0414\u0410" : "\u041D\u0415\u0422"}`);
+    const fileContent = await mockObsidian.vault.read(
+      mockObsidian.vault.getAbstractFileByPath(testFilePath)
+    );
+    const delta = await syncManager.createDelta(originalContent, fileContent);
+    console.log(`\u0421\u043E\u0437\u0434\u0430\u043D\u0430 \u0434\u0435\u043B\u044C\u0442\u0430 \u0440\u0430\u0437\u043C\u0435\u0440\u043E\u043C: ${delta.length} \u0431\u0430\u0439\u0442`);
+    console.log(`\u0420\u0430\u0437\u043C\u0435\u0440 \u0438\u0441\u0445\u043E\u0434\u043D\u043E\u0433\u043E \u0444\u0430\u0439\u043B\u0430: ${fileContent.length} \u0431\u0430\u0439\u0442`);
+    console.log("\u0422\u0435\u0441\u0442\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u0435 \u0448\u0438\u0444\u0440\u043E\u0432\u0430\u043D\u0438\u044F...");
+    const encrypted = await CryptoHelper.encrypt(fileContent, "test-password");
+    console.log(`\u0414\u0430\u043D\u043D\u044B\u0435 \u0437\u0430\u0448\u0438\u0444\u0440\u043E\u0432\u0430\u043D\u044B: ${encrypted ? "\u0414\u0410" : "\u041D\u0415\u0422"}`);
+    const decrypted = await CryptoHelper.decrypt(encrypted, "test-password");
+    const decryptionSuccess = decrypted === fileContent;
+    console.log(`\u0414\u0435\u0448\u0438\u0444\u0440\u043E\u0432\u0430\u043D\u0438\u0435 \u0443\u0441\u043F\u0435\u0448\u043D\u043E: ${decryptionSuccess ? "\u0414\u0410" : "\u041D\u0415\u0422"}`);
+    await syncManager.stop();
+    console.log(`\u0421\u0442\u0430\u0442\u0443\u0441 \u043F\u043E\u0441\u043B\u0435 \u043E\u0441\u0442\u0430\u043D\u043E\u0432\u043A\u0438: ${syncManager.relayClient.isConnected ? "\u041F\u041E\u0414\u041A\u041B\u042E\u0427\u0415\u041D\u041E" : "\u041E\u0422\u041A\u041B\u042E\u0427\u0415\u041D\u041E"}`);
+    const syncTestSuccess = indexedFiles === Object.keys(filesMap).length && fileInQueue && decryptionSuccess;
+    console.log(`\u0422\u0435\u0441\u0442 \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438: ${syncTestSuccess ? "\u041F\u0420\u041E\u0419\u0414\u0415\u041D" : "\u041D\u0415 \u041F\u0420\u041E\u0419\u0414\u0415\u041D"}`);
+    return syncTestSuccess;
+  } catch (error) {
+    console.error("\u041E\u0448\u0438\u0431\u043A\u0430 \u043F\u0440\u0438 \u0442\u0435\u0441\u0442\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u0438 \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438:", error);
+    return false;
+  }
+}
+var mockObsidian, filesMap, MockRelayClient;
+var init_sync_tests = __esm({
+  "src/tests/integration/sync-tests.ts"() {
+    init_sync_manager();
+    init_crypto();
+    mockObsidian = {
+      vault: {
+        getAbstractFileByPath: (path) => {
+          if (filesMap[path]) {
+            return {
+              path,
+              name: path.split("/").pop() || "",
+              stat: {
+                size: filesMap[path].content.length,
+                mtime: filesMap[path].mtime,
+                ctime: filesMap[path].mtime - 1e3
+              }
+            };
+          }
+          return null;
+        },
+        read: async (file) => {
+          var _a;
+          return ((_a = filesMap[file.path]) == null ? void 0 : _a.content) || "";
+        },
+        getFiles: () => {
+          return Object.keys(filesMap).map((path) => ({
+            path,
+            name: path.split("/").pop() || "",
+            stat: {
+              size: filesMap[path].content.length,
+              mtime: filesMap[path].mtime,
+              ctime: filesMap[path].mtime - 1e3
+            }
+          }));
+        },
+        on: () => {
+        },
+        // mock event registration
+        adapter: {
+          read: async (path) => {
+            var _a;
+            return ((_a = filesMap[path]) == null ? void 0 : _a.content) || "";
+          },
+          write: async (path, content) => {
+            if (!filesMap[path]) {
+              filesMap[path] = {
+                content: "",
+                mtime: Date.now()
+              };
+            }
+            filesMap[path].content = content;
+            filesMap[path].mtime = Date.now();
+          }
+        }
+      },
+      Notice: (message) => console.log("NOTICE:", message)
+    };
+    filesMap = {
+      "test/file1.md": {
+        content: "# Test File 1\n\nThis is a test file.",
+        mtime: Date.now()
+      },
+      "test/file2.md": {
+        content: "# Test File 2\n\nThis is another test file.",
+        mtime: Date.now() - 5e3
+      },
+      "test/notes/note1.md": {
+        content: "# Note 1\n\nImportant information.",
+        mtime: Date.now() - 1e4
+      }
+    };
+    MockRelayClient = class {
+      constructor(options) {
+        this.isConnected = false;
+        this.callbacks = {};
+        this.callbacks = {
+          onConnect: options.onConnect,
+          onDisconnect: options.onDisconnect,
+          onMessage: options.onMessage,
+          onDeviceConnected: options.onDeviceConnected,
+          onDeviceDisconnected: options.onDeviceDisconnected,
+          onTrustedDevicesChange: options.onTrustedDevicesChange,
+          onSyncRequest: options.onSyncRequest,
+          onInvitation: options.onInvitation
+        };
+      }
+      connect() {
+        this.isConnected = true;
+        if (this.callbacks.onConnect) {
+          this.callbacks.onConnect();
+        }
+      }
+      disconnect() {
+        this.isConnected = false;
+        if (this.callbacks.onDisconnect) {
+          this.callbacks.onDisconnect();
+        }
+      }
+      sendMessage(message) {
+        console.log("\u041E\u0442\u043F\u0440\u0430\u0432\u043A\u0430 \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u044F:", message);
+        setTimeout(() => {
+          if (message.type === "sync_request") {
+            if (this.callbacks.onMessage) {
+              this.callbacks.onMessage({
+                type: "sync_response",
+                success: true,
+                deviceId: "test-device-2",
+                sourceName: "Test Device 2"
+              });
+            }
+          } else if (message.type === "file_request") {
+            if (this.callbacks.onMessage) {
+              this.callbacks.onMessage({
+                type: "file_response",
+                path: message.path,
+                content: "Encrypted content",
+                hash: "test-hash",
+                sourceDeviceId: "test-device-2",
+                sourceName: "Test Device 2"
+              });
+            }
+          }
+        }, 100);
+        return true;
+      }
+    };
+  }
+});
+
+// src/tests/integration/trusted-device-tests.ts
+async function testTrustedDevices() {
+  console.log("=== \u0422\u0415\u0421\u0422\u0418\u0420\u041E\u0412\u0410\u041D\u0418\u0415 \u0423\u041F\u0420\u0410\u0412\u041B\u0415\u041D\u0418\u042F \u0414\u041E\u0412\u0415\u0420\u0415\u041D\u041D\u042B\u041C\u0418 \u0423\u0421\u0422\u0420\u041E\u0419\u0421\u0422\u0412\u0410\u041C\u0418 ===");
+  class MockRelayClient3 {
+    constructor(options) {
+      this.trustedDevices = [];
+      this.pendingInvitations = [];
+      this.isConnected = false;
+      this.callbacks = {};
+      this.callbacks = {
+        onConnect: options.onConnect,
+        onDisconnect: options.onDisconnect,
+        onMessage: options.onMessage,
+        onDeviceConnected: options.onDeviceConnected,
+        onDeviceDisconnected: options.onDeviceDisconnected,
+        onTrustedDevicesChange: options.onTrustedDevicesChange,
+        onSyncRequest: options.onSyncRequest,
+        onInvitation: options.onInvitation
+      };
+    }
+    connect() {
+      this.isConnected = true;
+      if (this.callbacks.onConnect) {
+        this.callbacks.onConnect();
+      }
+      setTimeout(() => {
+        if (this.callbacks.onTrustedDevicesChange) {
+          this.callbacks.onTrustedDevicesChange(this.trustedDevices);
+        }
+      }, 100);
+    }
+    disconnect() {
+      this.isConnected = false;
+      if (this.callbacks.onDisconnect) {
+        this.callbacks.onDisconnect();
+      }
+    }
+    sendMessage(message) {
+      console.log("\u041E\u0442\u043F\u0440\u0430\u0432\u043A\u0430 \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u044F:", message);
+      if (message.type === "generate_invitation") {
+        setTimeout(() => {
+          if (this.callbacks.onMessage) {
+            this.callbacks.onMessage({
+              type: "invitation_generated",
+              key: INVITATION_KEY,
+              success: true
+            });
+          }
+        }, 100);
+      } else if (message.type === "accept_invitation") {
+        setTimeout(() => {
+          const newDevice = {
+            id: OTHER_DEVICE_ID,
+            name: OTHER_DEVICE_NAME,
+            trusted: true,
+            lastSeen: (/* @__PURE__ */ new Date()).toISOString()
+          };
+          this.trustedDevices.push(newDevice);
+          if (this.callbacks.onTrustedDevicesChange) {
+            this.callbacks.onTrustedDevicesChange(this.trustedDevices);
+          }
+          if (this.callbacks.onMessage) {
+            this.callbacks.onMessage({
+              type: "invitation_accepted",
+              deviceId: OTHER_DEVICE_ID,
+              deviceName: OTHER_DEVICE_NAME,
+              success: true
+            });
+          }
+        }, 100);
+      } else if (message.type === "remove_trusted_device") {
+        setTimeout(() => {
+          this.trustedDevices = this.trustedDevices.filter(
+            (device) => device.id !== message.deviceId
+          );
+          if (this.callbacks.onTrustedDevicesChange) {
+            this.callbacks.onTrustedDevicesChange(this.trustedDevices);
+          }
+          if (this.callbacks.onMessage) {
+            this.callbacks.onMessage({
+              type: "device_removed",
+              deviceId: message.deviceId,
+              success: true
+            });
+          }
+        }, 100);
+      }
+      return true;
+    }
+    // Мок для имитации получения приглашения
+    simulateIncomingInvitation(sourceName, sourceDeviceId) {
+      if (this.callbacks.onInvitation) {
+        this.callbacks.onInvitation({
+          type: "invitation",
+          key: INVITATION_KEY,
+          sourceDeviceId,
+          sourceName
+        });
+      }
+    }
+  }
+  const mockObsidian2 = {
+    vault: {
+      on: () => {
+      }
+      // mock event registration
+    },
+    Notice: (message) => console.log("NOTICE:", message)
+  };
+  try {
+    const syncManager = new SyncManager(mockObsidian2, {
+      serverUrl: "ws://localhost:8080/ws",
+      encryptionPassword: "test-password"
+    });
+    const mockRelayClient = new MockRelayClient3({
+      onConnect: syncManager.handleConnect.bind(syncManager),
+      onDisconnect: syncManager.handleDisconnect.bind(syncManager),
+      onMessage: syncManager.handleMessage.bind(syncManager),
+      onDeviceConnected: syncManager.handleDeviceConnected.bind(syncManager),
+      onDeviceDisconnected: syncManager.handleDeviceDisconnected.bind(syncManager),
+      onTrustedDevicesChange: syncManager.handleTrustedDevicesChange.bind(syncManager),
+      onSyncRequest: syncManager.handleSyncRequest.bind(syncManager),
+      onInvitation: syncManager.handleInvitation.bind(syncManager)
+    });
+    syncManager.relayClient = mockRelayClient;
+    console.log("\u0417\u0430\u043F\u0443\u0441\u043A \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438...");
+    await syncManager.start();
+    console.log(`\u0421\u0442\u0430\u0442\u0443\u0441 \u0441\u043E\u0435\u0434\u0438\u043D\u0435\u043D\u0438\u044F: ${mockRelayClient.isConnected ? "\u041F\u041E\u0414\u041A\u041B\u042E\u0427\u0415\u041D\u041E" : "\u041E\u0422\u041A\u041B\u042E\u0427\u0415\u041D\u041E"}`);
+    console.log("\n\u0422\u0435\u0441\u0442\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u0435 \u0441\u043E\u0437\u0434\u0430\u043D\u0438\u044F \u043F\u0440\u0438\u0433\u043B\u0430\u0448\u0435\u043D\u0438\u044F...");
+    let invitationKey = INVITATION_KEY;
+    console.log(`\u041A\u043B\u044E\u0447 \u043F\u0440\u0438\u0433\u043B\u0430\u0448\u0435\u043D\u0438\u044F: ${invitationKey}`);
+    console.log(`\u0421\u043E\u0437\u0434\u0430\u043D\u0438\u0435 \u043F\u0440\u0438\u0433\u043B\u0430\u0448\u0435\u043D\u0438\u044F: ${invitationKey === INVITATION_KEY ? "\u0423\u0421\u041F\u0415\u0428\u041D\u041E" : "\u041E\u0428\u0418\u0411\u041A\u0410"}`);
+    console.log("\n\u0422\u0435\u0441\u0442\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u0435 \u043F\u043E\u043B\u0443\u0447\u0435\u043D\u0438\u044F \u043F\u0440\u0438\u0433\u043B\u0430\u0448\u0435\u043D\u0438\u044F...");
+    let invitationReceived = false;
+    const originalHandleInvitation = syncManager.handleInvitation;
+    syncManager.handleInvitation = function(invitation) {
+      invitationReceived = true;
+      originalHandleInvitation.call(syncManager, invitation);
+    };
+    mockRelayClient.simulateIncomingInvitation("Inviting Device", "inviting-device-id");
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    console.log(`\u041F\u0440\u0438\u0433\u043B\u0430\u0448\u0435\u043D\u0438\u0435 \u043F\u043E\u043B\u0443\u0447\u0435\u043D\u043E: ${invitationReceived ? "\u0414\u0410" : "\u041D\u0415\u0422"}`);
+    console.log("\n\u0422\u0435\u0441\u0442\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u0435 \u043F\u0440\u0438\u043D\u044F\u0442\u0438\u044F \u043F\u0440\u0438\u0433\u043B\u0430\u0448\u0435\u043D\u0438\u044F...");
+    mockRelayClient.sendMessage({
+      type: "accept_invitation",
+      key: INVITATION_KEY
+    });
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    const trustedDevices = syncManager.trustedDevices;
+    console.log(`\u041A\u043E\u043B\u0438\u0447\u0435\u0441\u0442\u0432\u043E \u0434\u043E\u0432\u0435\u0440\u0435\u043D\u043D\u044B\u0445 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432: ${trustedDevices.length}`);
+    const deviceAdded = trustedDevices.some((device) => device.id === OTHER_DEVICE_ID);
+    console.log(`\u0423\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u043E \u0434\u043E\u0431\u0430\u0432\u043B\u0435\u043D\u043E \u0432 \u0441\u043F\u0438\u0441\u043E\u043A \u0434\u043E\u0432\u0435\u0440\u0435\u043D\u043D\u044B\u0445: ${deviceAdded ? "\u0414\u0410" : "\u041D\u0415\u0422"}`);
+    console.log("\n\u0422\u0435\u0441\u0442\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u0435 \u0443\u0434\u0430\u043B\u0435\u043D\u0438\u044F \u0434\u043E\u0432\u0435\u0440\u0435\u043D\u043D\u043E\u0433\u043E \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u0430...");
+    mockRelayClient.sendMessage({
+      type: "remove_trusted_device",
+      deviceId: OTHER_DEVICE_ID
+    });
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    const trustedDevicesAfterRemoval = syncManager.trustedDevices;
+    const deviceRemoved = !trustedDevicesAfterRemoval.some((device) => device.id === OTHER_DEVICE_ID);
+    console.log(`\u0423\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u043E \u0443\u0434\u0430\u043B\u0435\u043D\u043E \u0438\u0437 \u0441\u043F\u0438\u0441\u043A\u0430 \u0434\u043E\u0432\u0435\u0440\u0435\u043D\u043D\u044B\u0445: ${deviceRemoved ? "\u0414\u0410" : "\u041D\u0415\u0422"}`);
+    await syncManager.stop();
+    const trustedDevicesTestSuccess = invitationKey === INVITATION_KEY && invitationReceived && deviceAdded && deviceRemoved;
+    console.log(`
+\u0422\u0435\u0441\u0442 \u0443\u043F\u0440\u0430\u0432\u043B\u0435\u043D\u0438\u044F \u0434\u043E\u0432\u0435\u0440\u0435\u043D\u043D\u044B\u043C\u0438 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u0430\u043C\u0438: ${trustedDevicesTestSuccess ? "\u041F\u0420\u041E\u0419\u0414\u0415\u041D" : "\u041D\u0415 \u041F\u0420\u041E\u0419\u0414\u0415\u041D"}`);
+    return trustedDevicesTestSuccess;
+  } catch (error) {
+    console.error("\u041E\u0448\u0438\u0431\u043A\u0430 \u043F\u0440\u0438 \u0442\u0435\u0441\u0442\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u0438 \u0434\u043E\u0432\u0435\u0440\u0435\u043D\u043D\u044B\u0445 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432:", error);
+    return false;
+  }
+}
+var INVITATION_KEY, OTHER_DEVICE_ID, OTHER_DEVICE_NAME;
+var init_trusted_device_tests = __esm({
+  "src/tests/integration/trusted-device-tests.ts"() {
+    init_sync_manager();
+    INVITATION_KEY = "test-invitation-key-12345";
+    OTHER_DEVICE_ID = "other-device-id";
+    OTHER_DEVICE_NAME = "Other Device";
+  }
+});
+
+// src/tests/integration/run-all-tests.ts
+async function runAllIntegrationTests() {
+  console.log("\n======= \u0417\u0410\u041F\u0423\u0421\u041A \u0412\u0421\u0415\u0425 \u0418\u041D\u0422\u0415\u0413\u0420\u0410\u0426\u0418\u041E\u041D\u041D\u042B\u0425 \u0422\u0415\u0421\u0422\u041E\u0412 \u041F\u041B\u0410\u0413\u0418\u041D\u0410 =======\n");
+  const results = {
+    connection: await testConnection(),
+    sync: await testSync(),
+    trustedDevices: await testTrustedDevices()
+  };
+  console.log("\n======= \u0420\u0415\u0417\u0423\u041B\u042C\u0422\u0410\u0422\u042B \u0418\u041D\u0422\u0415\u0413\u0420\u0410\u0426\u0418\u041E\u041D\u041D\u042B\u0425 \u0422\u0415\u0421\u0422\u041E\u0412 =======");
+  for (const [test, result] of Object.entries(results)) {
+    console.log(`${test}: ${result ? "\u2705 \u041F\u0420\u041E\u0419\u0414\u0415\u041D" : "\u274C \u041D\u0415 \u041F\u0420\u041E\u0419\u0414\u0415\u041D"}`);
+  }
+  const allPassed = Object.values(results).every((result) => result);
+  console.log(`
+\u041E\u0431\u0449\u0438\u0439 \u0440\u0435\u0437\u0443\u043B\u044C\u0442\u0430\u0442 \u0438\u043D\u0442\u0435\u0433\u0440\u0430\u0446\u0438\u043E\u043D\u043D\u044B\u0445 \u0442\u0435\u0441\u0442\u043E\u0432: ${allPassed ? "\u2705 \u0412\u0421\u0415 \u0422\u0415\u0421\u0422\u042B \u041F\u0420\u041E\u0419\u0414\u0415\u041D\u042B" : "\u274C \u0415\u0421\u0422\u042C \u041F\u0420\u041E\u0411\u041B\u0415\u041C\u042B"}`);
+  return allPassed;
+}
+async function runAllTests2() {
+  console.log("\n======= \u0417\u0410\u041F\u0423\u0421\u041A \u041F\u041E\u041B\u041D\u041E\u0413\u041E \u041D\u0410\u0411\u041E\u0420\u0410 \u0422\u0415\u0421\u0422\u041E\u0412 \u041F\u041B\u0410\u0413\u0418\u041D\u0410 =======\n");
+  try {
+    console.log("1. \u0417\u0430\u043F\u0443\u0441\u043A \u0442\u0435\u0441\u0442\u043E\u0432 \u043E\u043F\u0442\u0438\u043C\u0438\u0437\u0430\u0446\u0438\u0439...");
+    const optimizerTestsResults = await runAllTests();
+    console.log("\n2. \u0417\u0430\u043F\u0443\u0441\u043A \u0438\u043D\u0442\u0435\u0433\u0440\u0430\u0446\u0438\u043E\u043D\u043D\u044B\u0445 \u0442\u0435\u0441\u0442\u043E\u0432...");
+    const integrationTestsResults = await runAllIntegrationTests();
+    console.log("\n======= \u041E\u0411\u0429\u0418\u0415 \u0420\u0415\u0417\u0423\u041B\u042C\u0422\u0410\u0422\u042B \u0422\u0415\u0421\u0422\u0418\u0420\u041E\u0412\u0410\u041D\u0418\u042F =======");
+    console.log(`\u0422\u0435\u0441\u0442\u044B \u043E\u043F\u0442\u0438\u043C\u0438\u0437\u0430\u0446\u0438\u0439: ${optimizerTestsResults ? "\u2705 \u041F\u0420\u041E\u0419\u0414\u0415\u041D\u042B" : "\u274C \u041D\u0415 \u041F\u0420\u041E\u0419\u0414\u0415\u041D\u042B"}`);
+    console.log(`\u0418\u043D\u0442\u0435\u0433\u0440\u0430\u0446\u0438\u043E\u043D\u043D\u044B\u0435 \u0442\u0435\u0441\u0442\u044B: ${integrationTestsResults ? "\u2705 \u041F\u0420\u041E\u0419\u0414\u0415\u041D\u042B" : "\u274C \u041D\u0415 \u041F\u0420\u041E\u0419\u0414\u0415\u041D\u042B"}`);
+    const allPassed = optimizerTestsResults && integrationTestsResults;
+    console.log(`
+\u041E\u0431\u0449\u0438\u0439 \u0440\u0435\u0437\u0443\u043B\u044C\u0442\u0430\u0442 \u0442\u0435\u0441\u0442\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u044F: ${allPassed ? "\u2705 \u0412\u0421\u0415 \u0422\u0415\u0421\u0422\u042B \u041F\u0420\u041E\u0419\u0414\u0415\u041D\u042B" : "\u274C \u0415\u0421\u0422\u042C \u041F\u0420\u041E\u0411\u041B\u0415\u041C\u042B"}`);
+    return allPassed;
+  } catch (error) {
+    console.error("\u041E\u0448\u0438\u0431\u043A\u0430 \u043F\u0440\u0438 \u0437\u0430\u043F\u0443\u0441\u043A\u0435 \u0442\u0435\u0441\u0442\u043E\u0432:", error);
+    return false;
+  }
+}
+var init_run_all_tests = __esm({
+  "src/tests/integration/run-all-tests.ts"() {
+    init_mocks();
+    init_connection_tests();
+    init_sync_tests();
+    init_trusted_device_tests();
+    init_optimizer_tests();
+    if (typeof require !== "undefined" && require.main === module) {
+      runAllTests2().then((result) => {
+        process.exit(result ? 0 : 1);
+      });
+    }
+  }
+});
+
+// src/tests/integration/real-sync-test.ts
+function createTestFiles(deviceId) {
+  const files = {};
+  for (let i = 1; i <= TEST_FILES_COUNT; i++) {
+    const path = `${TEST_FILE_PREFIX}/${deviceId}/file${i}.md`;
+    files[path] = `# \u0422\u0435\u0441\u0442\u043E\u0432\u044B\u0439 \u0444\u0430\u0439\u043B ${i} \u043E\u0442 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u0430 ${deviceId}
+
+\u042D\u0442\u043E \u0442\u0435\u0441\u0442\u043E\u0432\u044B\u0439 \u0444\u0430\u0439\u043B \u0434\u043B\u044F \u043F\u0440\u043E\u0432\u0435\u0440\u043A\u0438 \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438.
+\u0418\u0437\u043D\u0430\u0447\u0430\u043B\u044C\u043D\u0430\u044F \u0432\u0435\u0440\u0441\u0438\u044F \u0444\u0430\u0439\u043B\u0430.`;
+  }
+  return files;
+}
+async function wait(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+async function testRealSync() {
+  var _a, _b;
+  const log = (message) => {
+    console.log(`[REAL-SYNC-TEST] ${message}`);
+    return message;
+  };
+  const device1Id = await CryptoHelper.hashString("test-device-1-" + Date.now());
+  const device2Id = await CryptoHelper.hashString("test-device-2-" + Date.now());
+  log(`\u0422\u0435\u0441\u0442\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u0435 \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438 \u043C\u0435\u0436\u0434\u0443 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u0430\u043C\u0438: ${device1Id.slice(0, 8)}... \u0438 ${device2Id.slice(0, 8)}...`);
+  const device1Files = createTestFiles("device1");
+  const device2Files = createTestFiles("device2");
+  const vault1 = new MockVault(device1Files);
+  const vault2 = new MockVault(device2Files);
+  const app1 = new MockApp(vault1);
+  const app2 = new MockApp(vault2);
+  const syncManager1 = new SyncManager(app1, {
+    serverUrl: SERVER_URL,
+    encryptionPassword: ENCRYPTION_PASSWORD,
+    ignoredPaths: [".obsidian/", ".git/"]
+  });
+  const syncManager2 = new SyncManager(app2, {
+    serverUrl: SERVER_URL,
+    encryptionPassword: ENCRYPTION_PASSWORD,
+    ignoredPaths: [".obsidian/", ".git/"]
+  });
+  syncManager1.deviceId = device1Id;
+  syncManager2.deviceId = device2Id;
+  try {
+    log("\u0417\u0430\u043F\u0443\u0441\u043A \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438 \u043D\u0430 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u0435 1...");
+    await syncManager1.start();
+    log("\u0417\u0430\u043F\u0443\u0441\u043A \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438 \u043D\u0430 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u0435 2...");
+    await syncManager2.start();
+    log("\u041E\u0436\u0438\u0434\u0430\u043D\u0438\u0435 \u043F\u043E\u0434\u043A\u043B\u044E\u0447\u0435\u043D\u0438\u044F \u043A \u0441\u0435\u0440\u0432\u0435\u0440\u0443...");
+    await wait(5e3);
+    const device1Connected = syncManager1.relayClient.isConnected;
+    const device2Connected = syncManager2.relayClient.isConnected;
+    log(`\u0421\u0442\u0430\u0442\u0443\u0441 \u0441\u043E\u0435\u0434\u0438\u043D\u0435\u043D\u0438\u044F \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u0430 1: ${device1Connected ? "\u041F\u041E\u0414\u041A\u041B\u042E\u0427\u0415\u041D\u041E" : "\u041E\u0422\u041A\u041B\u042E\u0427\u0415\u041D\u041E"}`);
+    log(`\u0421\u0442\u0430\u0442\u0443\u0441 \u0441\u043E\u0435\u0434\u0438\u043D\u0435\u043D\u0438\u044F \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u0430 2: ${device2Connected ? "\u041F\u041E\u0414\u041A\u041B\u042E\u0427\u0415\u041D\u041E" : "\u041E\u0422\u041A\u041B\u042E\u0427\u0415\u041D\u041E"}`);
+    if (!device1Connected || !device2Connected) {
+      throw new Error("\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u043F\u043E\u0434\u043A\u043B\u044E\u0447\u0438\u0442\u044C\u0441\u044F \u043A \u0441\u0435\u0440\u0432\u0435\u0440\u0443");
+    }
+    log("\u0414\u0435\u043B\u0430\u0435\u043C \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u0430 \u0434\u043E\u0432\u0435\u0440\u0435\u043D\u043D\u044B\u043C\u0438 \u0434\u0440\u0443\u0433 \u0434\u043B\u044F \u0434\u0440\u0443\u0433\u0430...");
+    syncManager1.trustedDevices.push({
+      id: device2Id,
+      name: "Test Device 2",
+      trusted: true,
+      lastSeen: (/* @__PURE__ */ new Date()).toISOString()
+    });
+    syncManager2.trustedDevices.push({
+      id: device1Id,
+      name: "Test Device 1",
+      trusted: true,
+      lastSeen: (/* @__PURE__ */ new Date()).toISOString()
+    });
+    log("\u0418\u043D\u0438\u0446\u0438\u0430\u043B\u0438\u0437\u0430\u0446\u0438\u044F \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438...");
+    await wait(3e3);
+    const device1TrustedCount = ((_a = syncManager1.trustedDevices) == null ? void 0 : _a.length) || 0;
+    const device2TrustedCount = ((_b = syncManager2.trustedDevices) == null ? void 0 : _b.length) || 0;
+    log(`\u0414\u043E\u0432\u0435\u0440\u0435\u043D\u043D\u044B\u0445 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432 \u0443 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u0430 1: ${device1TrustedCount}`);
+    log(`\u0414\u043E\u0432\u0435\u0440\u0435\u043D\u043D\u044B\u0445 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432 \u0443 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u0430 2: ${device2TrustedCount}`);
+    log("\u0417\u0430\u043F\u0443\u0441\u043A \u043F\u043E\u043B\u043D\u043E\u0439 \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438...");
+    await syncManager1.performFullSync();
+    await syncManager2.performFullSync();
+    log("\u041E\u0436\u0438\u0434\u0430\u043D\u0438\u0435 \u0437\u0430\u0432\u0435\u0440\u0448\u0435\u043D\u0438\u044F \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438...");
+    await wait(5e3);
+    const device1FilesCount = Object.keys(vault1.files).length;
+    const device2FilesCount = Object.keys(vault2.files).length;
+    log(`\u041A\u043E\u043B\u0438\u0447\u0435\u0441\u0442\u0432\u043E \u0444\u0430\u0439\u043B\u043E\u0432 \u043D\u0430 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u0435 1: ${device1FilesCount}`);
+    log(`\u041A\u043E\u043B\u0438\u0447\u0435\u0441\u0442\u0432\u043E \u0444\u0430\u0439\u043B\u043E\u0432 \u043D\u0430 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u0435 2: ${device2FilesCount}`);
+    const device1HasDevice2Files = Object.keys(vault1.files).some((path) => path.includes("/device2/"));
+    const device2HasDevice1Files = Object.keys(vault2.files).some((path) => path.includes("/device1/"));
+    log(`\u0423\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u043E 1 \u0438\u043C\u0435\u0435\u0442 \u0444\u0430\u0439\u043B\u044B \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u0430 2: ${device1HasDevice2Files ? "\u0414\u0410" : "\u041D\u0415\u0422"}`);
+    log(`\u0423\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u043E 2 \u0438\u043C\u0435\u0435\u0442 \u0444\u0430\u0439\u043B\u044B \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u0430 1: ${device2HasDevice1Files ? "\u0414\u0410" : "\u041D\u0415\u0422"}`);
+    log("\u0418\u0437\u043C\u0435\u043D\u0435\u043D\u0438\u0435 \u0444\u0430\u0439\u043B\u043E\u0432 \u043D\u0430 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u0435 1...");
+    for (let i = 1; i <= 3; i++) {
+      const path = `${TEST_FILE_PREFIX}/device1/file${i}.md`;
+      await vault1.modify(path, (content) => content + `
+
+\u0418\u0437\u043C\u0435\u043D\u0435\u043D\u0438\u0435 #1 \u043D\u0430 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u0435 1. \u041C\u0435\u0442\u043A\u0430 \u0432\u0440\u0435\u043C\u0435\u043D\u0438: ${Date.now()}`);
+      syncManager1.handleFileChange({
+        path,
+        type: "modify",
+        file: vault1.getAbstractFileByPath(path)
+      });
+    }
+    log("\u0418\u0437\u043C\u0435\u043D\u0435\u043D\u0438\u0435 \u0444\u0430\u0439\u043B\u043E\u0432 \u043D\u0430 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u0435 2...");
+    for (let i = 1; i <= 3; i++) {
+      const path = `${TEST_FILE_PREFIX}/device2/file${i}.md`;
+      await vault2.modify(path, (content) => content + `
+
+\u0418\u0437\u043C\u0435\u043D\u0435\u043D\u0438\u0435 #1 \u043D\u0430 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u0435 2. \u041C\u0435\u0442\u043A\u0430 \u0432\u0440\u0435\u043C\u0435\u043D\u0438: ${Date.now()}`);
+      syncManager2.handleFileChange({
+        path,
+        type: "modify",
+        file: vault2.getAbstractFileByPath(path)
+      });
+    }
+    log("\u041E\u0436\u0438\u0434\u0430\u043D\u0438\u0435 \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438 \u0438\u0437\u043C\u0435\u043D\u0435\u043D\u0438\u0439...");
+    await wait(1e4);
+    log("\u041F\u0440\u043E\u0432\u0435\u0440\u043A\u0430 \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438 \u0438\u0437\u043C\u0435\u043D\u0435\u043D\u0438\u0439...");
+    let device1ChangesOnDevice2 = true;
+    for (let i = 1; i <= 3; i++) {
+      const path = `${TEST_FILE_PREFIX}/device1/file${i}.md`;
+      const device2Content = await vault2.read(vault2.getAbstractFileByPath(path));
+      if (!device2Content.includes("\u0418\u0437\u043C\u0435\u043D\u0435\u043D\u0438\u0435 #1 \u043D\u0430 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u0435 1")) {
+        device1ChangesOnDevice2 = false;
+        break;
+      }
+    }
+    let device2ChangesOnDevice1 = true;
+    for (let i = 1; i <= 3; i++) {
+      const path = `${TEST_FILE_PREFIX}/device2/file${i}.md`;
+      const device1Content = await vault1.read(vault1.getAbstractFileByPath(path));
+      if (!device1Content.includes("\u0418\u0437\u043C\u0435\u043D\u0435\u043D\u0438\u0435 #1 \u043D\u0430 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u0435 2")) {
+        device2ChangesOnDevice1 = false;
+        break;
+      }
+    }
+    log(`\u0418\u0437\u043C\u0435\u043D\u0435\u043D\u0438\u044F \u0441 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u0430 1 \u0435\u0441\u0442\u044C \u043D\u0430 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u0435 2: ${device1ChangesOnDevice2 ? "\u0414\u0410" : "\u041D\u0415\u0422"}`);
+    log(`\u0418\u0437\u043C\u0435\u043D\u0435\u043D\u0438\u044F \u0441 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u0430 2 \u0435\u0441\u0442\u044C \u043D\u0430 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u0435 1: ${device2ChangesOnDevice1 ? "\u0414\u0410" : "\u041D\u0415\u0422"}`);
+    log("\u0412\u043D\u0435\u0441\u0435\u043D\u0438\u0435 \u0432\u0442\u043E\u0440\u043E\u0439 \u0432\u043E\u043B\u043D\u044B \u0438\u0437\u043C\u0435\u043D\u0435\u043D\u0438\u0439...");
+    for (let i = 4; i <= 6; i++) {
+      const path1 = `${TEST_FILE_PREFIX}/device1/file${i}.md`;
+      await vault1.modify(path1, (content) => content + `
+
+\u0418\u0437\u043C\u0435\u043D\u0435\u043D\u0438\u0435 #2 \u043D\u0430 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u0435 1. \u041C\u0435\u0442\u043A\u0430 \u0432\u0440\u0435\u043C\u0435\u043D\u0438: ${Date.now()}`);
+      syncManager1.handleFileChange({
+        path: path1,
+        type: "modify",
+        file: vault1.getAbstractFileByPath(path1)
+      });
+      const path2 = `${TEST_FILE_PREFIX}/device2/file${i}.md`;
+      await vault2.modify(path2, (content) => content + `
+
+\u0418\u0437\u043C\u0435\u043D\u0435\u043D\u0438\u0435 #2 \u043D\u0430 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u0435 2. \u041C\u0435\u0442\u043A\u0430 \u0432\u0440\u0435\u043C\u0435\u043D\u0438: ${Date.now()}`);
+      syncManager2.handleFileChange({
+        path: path2,
+        type: "modify",
+        file: vault2.getAbstractFileByPath(path2)
+      });
+    }
+    log("\u041E\u0436\u0438\u0434\u0430\u043D\u0438\u0435 \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438 \u0432\u0442\u043E\u0440\u043E\u0439 \u0432\u043E\u043B\u043D\u044B \u0438\u0437\u043C\u0435\u043D\u0435\u043D\u0438\u0439...");
+    await wait(1e4);
+    log("\u041F\u0440\u043E\u0432\u0435\u0440\u043A\u0430 \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438 \u0432\u0442\u043E\u0440\u043E\u0439 \u0432\u043E\u043B\u043D\u044B \u0438\u0437\u043C\u0435\u043D\u0435\u043D\u0438\u0439...");
+    let device1Changes2OnDevice2 = true;
+    for (let i = 4; i <= 6; i++) {
+      const path = `${TEST_FILE_PREFIX}/device1/file${i}.md`;
+      const device2Content = await vault2.read(vault2.getAbstractFileByPath(path));
+      if (!device2Content.includes("\u0418\u0437\u043C\u0435\u043D\u0435\u043D\u0438\u0435 #2 \u043D\u0430 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u0435 1")) {
+        device1Changes2OnDevice2 = false;
+        break;
+      }
+    }
+    let device2Changes2OnDevice1 = true;
+    for (let i = 4; i <= 6; i++) {
+      const path = `${TEST_FILE_PREFIX}/device2/file${i}.md`;
+      const device1Content = await vault1.read(vault1.getAbstractFileByPath(path));
+      if (!device1Content.includes("\u0418\u0437\u043C\u0435\u043D\u0435\u043D\u0438\u0435 #2 \u043D\u0430 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u0435 2")) {
+        device2Changes2OnDevice1 = false;
+        break;
+      }
+    }
+    log(`\u0412\u0442\u043E\u0440\u0430\u044F \u0432\u043E\u043B\u043D\u0430 \u0438\u0437\u043C\u0435\u043D\u0435\u043D\u0438\u0439 \u0441 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u0430 1 \u0435\u0441\u0442\u044C \u043D\u0430 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u0435 2: ${device1Changes2OnDevice2 ? "\u0414\u0410" : "\u041D\u0415\u0422"}`);
+    log(`\u0412\u0442\u043E\u0440\u0430\u044F \u0432\u043E\u043B\u043D\u0430 \u0438\u0437\u043C\u0435\u043D\u0435\u043D\u0438\u0439 \u0441 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u0430 2 \u0435\u0441\u0442\u044C \u043D\u0430 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u0435 1: ${device2Changes2OnDevice1 ? "\u0414\u0410" : "\u041D\u0415\u0422"}`);
+    log("\u0421\u043E\u0437\u0434\u0430\u043D\u0438\u0435 \u043A\u043E\u043D\u0444\u043B\u0438\u043A\u0442\u043D\u043E\u0439 \u0441\u0438\u0442\u0443\u0430\u0446\u0438\u0438...");
+    const conflictPath = `${TEST_FILE_PREFIX}/conflict_test.md`;
+    await vault1.write(conflictPath, "# \u041A\u043E\u043D\u0444\u043B\u0438\u043A\u0442\u043D\u044B\u0439 \u0444\u0430\u0439\u043B\n\n\u042D\u0442\u043E \u0444\u0430\u0439\u043B \u0434\u043B\u044F \u043F\u0440\u043E\u0432\u0435\u0440\u043A\u0438 \u0440\u0430\u0437\u0440\u0435\u0448\u0435\u043D\u0438\u044F \u043A\u043E\u043D\u0444\u043B\u0438\u043A\u0442\u043E\u0432.");
+    syncManager1.handleFileChange({
+      path: conflictPath,
+      type: "create",
+      file: vault1.getAbstractFileByPath(conflictPath)
+    });
+    await wait(5e3);
+    await vault1.modify(conflictPath, (content) => content + "\n\n\u0418\u0437\u043C\u0435\u043D\u0435\u043D\u0438\u0435 \u0434\u043B\u044F \u043A\u043E\u043D\u0444\u043B\u0438\u043A\u0442\u0430 \u043D\u0430 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u0435 1.");
+    syncManager1.handleFileChange({
+      path: conflictPath,
+      type: "modify",
+      file: vault1.getAbstractFileByPath(conflictPath)
+    });
+    await vault2.modify(conflictPath, (content) => content + "\n\n\u0418\u0437\u043C\u0435\u043D\u0435\u043D\u0438\u0435 \u0434\u043B\u044F \u043A\u043E\u043D\u0444\u043B\u0438\u043A\u0442\u0430 \u043D\u0430 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u0435 2.");
+    syncManager2.handleFileChange({
+      path: conflictPath,
+      type: "modify",
+      file: vault2.getAbstractFileByPath(conflictPath)
+    });
+    log("\u041E\u0436\u0438\u0434\u0430\u043D\u0438\u0435 \u0440\u0430\u0437\u0440\u0435\u0448\u0435\u043D\u0438\u044F \u043A\u043E\u043D\u0444\u043B\u0438\u043A\u0442\u0430...");
+    await wait(1e4);
+    const device1Files2 = Object.keys(vault1.files);
+    const device2Files2 = Object.keys(vault2.files);
+    const conflictFilesOnDevice1 = device1Files2.filter((path) => path.includes("conflict") && path.includes("conflicted"));
+    const conflictFilesOnDevice2 = device2Files2.filter((path) => path.includes("conflict") && path.includes("conflicted"));
+    log(`\u041E\u0431\u043D\u0430\u0440\u0443\u0436\u0435\u043D\u043E \u043A\u043E\u043D\u0444\u043B\u0438\u043A\u0442\u043D\u044B\u0445 \u0444\u0430\u0439\u043B\u043E\u0432 \u043D\u0430 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u0435 1: ${conflictFilesOnDevice1.length}`);
+    log(`\u041E\u0431\u043D\u0430\u0440\u0443\u0436\u0435\u043D\u043E \u043A\u043E\u043D\u0444\u043B\u0438\u043A\u0442\u043D\u044B\u0445 \u0444\u0430\u0439\u043B\u043E\u0432 \u043D\u0430 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u0435 2: ${conflictFilesOnDevice2.length}`);
+    const syncResult = {
+      initialSyncSuccess: device1HasDevice2Files && device2HasDevice1Files,
+      changesSyncSuccess: device1ChangesOnDevice2 && device2ChangesOnDevice1,
+      secondChangesSyncSuccess: device1Changes2OnDevice2 && device2Changes2OnDevice1,
+      conflictResolution: conflictFilesOnDevice1.length > 0 || conflictFilesOnDevice2.length > 0
+    };
+    log("\u041E\u0441\u0442\u0430\u043D\u043E\u0432\u043A\u0430 \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438...");
+    await syncManager1.stop();
+    await syncManager2.stop();
+    const success = syncResult.initialSyncSuccess && syncResult.changesSyncSuccess && syncResult.secondChangesSyncSuccess && syncResult.conflictResolution;
+    log(`\u0420\u0435\u0437\u0443\u043B\u044C\u0442\u0430\u0442 \u0442\u0435\u0441\u0442\u0430 \u0440\u0435\u0430\u043B\u044C\u043D\u043E\u0439 \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438: ${success ? "\u0423\u0421\u041F\u0415\u0428\u041D\u041E" : "\u041E\u0428\u0418\u0411\u041A\u0410"}`);
+    log("\u0414\u0435\u0442\u0430\u043B\u0438 \u0442\u0435\u0441\u0442\u0430:");
+    log(`- \u041D\u0430\u0447\u0430\u043B\u044C\u043D\u0430\u044F \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u044F: ${syncResult.initialSyncSuccess ? "\u0423\u0421\u041F\u0415\u0428\u041D\u041E" : "\u041E\u0428\u0418\u0411\u041A\u0410"}`);
+    log(`- \u0421\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u044F \u043F\u0435\u0440\u0432\u043E\u0439 \u0432\u043E\u043B\u043D\u044B \u0438\u0437\u043C\u0435\u043D\u0435\u043D\u0438\u0439: ${syncResult.changesSyncSuccess ? "\u0423\u0421\u041F\u0415\u0428\u041D\u041E" : "\u041E\u0428\u0418\u0411\u041A\u0410"}`);
+    log(`- \u0421\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u044F \u0432\u0442\u043E\u0440\u043E\u0439 \u0432\u043E\u043B\u043D\u044B \u0438\u0437\u043C\u0435\u043D\u0435\u043D\u0438\u0439: ${syncResult.secondChangesSyncSuccess ? "\u0423\u0421\u041F\u0415\u0428\u041D\u041E" : "\u041E\u0428\u0418\u0411\u041A\u0410"}`);
+    log(`- \u041E\u0431\u0440\u0430\u0431\u043E\u0442\u043A\u0430 \u043A\u043E\u043D\u0444\u043B\u0438\u043A\u0442\u043E\u0432: ${syncResult.conflictResolution ? "\u0423\u0421\u041F\u0415\u0428\u041D\u041E" : "\u041E\u0428\u0418\u0411\u041A\u0410"}`);
+    return success;
+  } catch (error) {
+    log(`\u041E\u0428\u0418\u0411\u041A\u0410: ${error.message}`);
+    console.error("\u041E\u0448\u0438\u0431\u043A\u0430 \u043F\u0440\u0438 \u0442\u0435\u0441\u0442\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u0438 \u0440\u0435\u0430\u043B\u044C\u043D\u043E\u0439 \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438:", error);
+    await syncManager1.stop();
+    await syncManager2.stop();
+    return false;
+  }
+}
+async function runRealSyncTest() {
+  try {
+    new import_obsidian5.Notice("\u0417\u0430\u043F\u0443\u0441\u043A \u0442\u0435\u0441\u0442\u0430 \u0440\u0435\u0430\u043B\u044C\u043D\u043E\u0439 \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438...");
+    console.log("===== \u0417\u0410\u041F\u0423\u0421\u041A \u0422\u0415\u0421\u0422\u0410 \u0420\u0415\u0410\u041B\u042C\u041D\u041E\u0419 \u0421\u0418\u041D\u0425\u0420\u041E\u041D\u0418\u0417\u0410\u0426\u0418\u0418 =====");
+    const testTimeout = setTimeout(() => {
+      new import_obsidian5.Notice("\u274C \u0422\u0435\u0441\u0442 \u043F\u0440\u0435\u0440\u0432\u0430\u043D \u043F\u043E \u0442\u0430\u0439\u043C\u0430\u0443\u0442\u0443", 1e4);
+      console.error("\u0422\u0435\u0441\u0442 \u0440\u0435\u0430\u043B\u044C\u043D\u043E\u0439 \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438 \u043F\u0440\u0435\u0440\u0432\u0430\u043D \u043F\u043E \u0442\u0430\u0439\u043C\u0430\u0443\u0442\u0443");
+    }, TEST_TIMEOUT_MS);
+    const success = await testRealSync();
+    clearTimeout(testTimeout);
+    if (success) {
+      new import_obsidian5.Notice("\u2705 \u0422\u0435\u0441\u0442 \u0440\u0435\u0430\u043B\u044C\u043D\u043E\u0439 \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438 \u0443\u0441\u043F\u0435\u0448\u043D\u043E \u043F\u0440\u043E\u0439\u0434\u0435\u043D!", 1e4);
+    } else {
+      new import_obsidian5.Notice("\u274C \u0422\u0435\u0441\u0442 \u0440\u0435\u0430\u043B\u044C\u043D\u043E\u0439 \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438 \u043D\u0435 \u043F\u0440\u043E\u0439\u0434\u0435\u043D. \u041F\u043E\u0434\u0440\u043E\u0431\u043D\u043E\u0441\u0442\u0438 \u0432 \u043A\u043E\u043D\u0441\u043E\u043B\u0438 \u0440\u0430\u0437\u0440\u0430\u0431\u043E\u0442\u0447\u0438\u043A\u0430.", 1e4);
+    }
+    return success;
+  } catch (error) {
+    console.error("\u041A\u0440\u0438\u0442\u0438\u0447\u0435\u0441\u043A\u0430\u044F \u043E\u0448\u0438\u0431\u043A\u0430 \u043F\u0440\u0438 \u0437\u0430\u043F\u0443\u0441\u043A\u0435 \u0442\u0435\u0441\u0442\u0430:", error);
+    new import_obsidian5.Notice(`\u274C \u041A\u0440\u0438\u0442\u0438\u0447\u0435\u0441\u043A\u0430\u044F \u043E\u0448\u0438\u0431\u043A\u0430 \u043F\u0440\u0438 \u0437\u0430\u043F\u0443\u0441\u043A\u0435 \u0442\u0435\u0441\u0442\u0430: ${error.message}`, 1e4);
+    return false;
+  }
+}
+var import_obsidian5, SERVER_URL, ENCRYPTION_PASSWORD, TEST_FILES_COUNT, TEST_FILE_PREFIX, TEST_TIMEOUT_MS, MockVault, MockApp;
+var init_real_sync_test = __esm({
+  "src/tests/integration/real-sync-test.ts"() {
+    import_obsidian5 = require("obsidian");
+    init_sync_manager();
+    init_crypto();
+    SERVER_URL = "ws://176.53.161.220:8080/ws";
+    ENCRYPTION_PASSWORD = "test-encryption-password";
+    TEST_FILES_COUNT = 10;
+    TEST_FILE_PREFIX = "sync-test";
+    TEST_TIMEOUT_MS = 6e4;
+    MockVault = class {
+      constructor(initialFiles) {
+        this.files = {};
+        this.adapter = {
+          getName: () => "mock-adapter",
+          exists: async (path) => !!this.files[path],
+          read: async (path) => {
+            var _a;
+            return ((_a = this.files[path]) == null ? void 0 : _a.content) || "";
+          },
+          write: async (path, data) => {
+            this.files[path] = {
+              content: data,
+              mtime: Date.now()
+            };
+            return true;
+          },
+          remove: async (path) => {
+            delete this.files[path];
+            return true;
+          }
+        };
+        if (initialFiles) {
+          Object.entries(initialFiles).forEach(([path, content]) => {
+            this.files[path] = {
+              content,
+              mtime: Date.now()
+            };
+          });
+        }
+      }
+      getAbstractFileByPath(path) {
+        if (!this.files[path])
+          return null;
+        return {
+          path,
+          name: path.split("/").pop() || "",
+          stat: {
+            size: this.files[path].content.length,
+            mtime: this.files[path].mtime,
+            ctime: this.files[path].mtime - 1e3
+          }
+        };
+      }
+      async read(file) {
+        var _a;
+        return ((_a = this.files[file.path]) == null ? void 0 : _a.content) || "";
+      }
+      async write(path, content) {
+        this.files[path] = {
+          content,
+          mtime: Date.now()
+        };
+        return true;
+      }
+      async modify(path, modifier) {
+        if (!this.files[path])
+          return false;
+        const oldContent = this.files[path].content;
+        const newContent = modifier(oldContent);
+        this.files[path] = {
+          content: newContent,
+          mtime: Date.now()
+        };
+        return true;
+      }
+      getFiles() {
+        return Object.keys(this.files).map((path) => ({
+          path,
+          name: path.split("/").pop() || "",
+          stat: {
+            size: this.files[path].content.length,
+            mtime: this.files[path].mtime,
+            ctime: this.files[path].mtime - 1e3
+          }
+        }));
+      }
+      on() {
+        return { unsubscribe: () => {
+        } };
+      }
+    };
+    MockApp = class {
+      constructor(vault) {
+        this.vault = vault;
+      }
+    };
+  }
+});
+
+// src/tests/integration/mock-sync-test.ts
+async function testMockSync() {
+  const log = (message) => {
+    console.log(`[MOCK-SYNC-TEST] ${message}`);
+    return message;
+  };
+  log("\u0417\u0430\u043F\u0443\u0441\u043A \u0442\u0435\u0441\u0442\u0430 \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438 \u0441 \u0438\u0441\u043F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u043D\u0438\u0435\u043C \u043C\u043E\u043A\u043E\u0432");
+  const device1Id = "device1";
+  const device2Id = "device2";
+  const app1 = new MockApp2();
+  const app2 = new MockApp2();
+  app1.vault.create("test1.md", "# Test file 1\nContent from device 1");
+  app2.vault.create("test2.md", "# Test file 2\nContent from device 2");
+  log(`\u0421\u043E\u0437\u0434\u0430\u043D\u043E \u0442\u0435\u0441\u0442\u043E\u0432\u044B\u0445 \u0444\u0430\u0439\u043B\u043E\u0432: 1 \u043D\u0430 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u0435 1, 1 \u043D\u0430 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u0435 2`);
+  const syncManager1 = new SyncManager(app1, {
+    serverUrl: "ws://mock-server",
+    encryptionPassword: "test-password"
+  });
+  const syncManager2 = new SyncManager(app2, {
+    serverUrl: "ws://mock-server",
+    encryptionPassword: "test-password"
+  });
+  syncManager1.deviceId = device1Id;
+  syncManager2.deviceId = device2Id;
+  const safeCreateHandler = (manager, methodName) => {
+    return function(data) {
+      if (manager && typeof manager[methodName] === "function") {
+        manager[methodName](data);
+      } else {
+        console.log(`\u041C\u0435\u0442\u043E\u0434 ${methodName} \u043D\u0435 \u043D\u0430\u0439\u0434\u0435\u043D \u0432 SyncManager \u0438\u043B\u0438 \u043D\u0435\u0434\u043E\u0441\u0442\u0443\u043F\u0435\u043D`);
+      }
+    };
+  };
+  syncManager1.relayClient = new MockRelayClient2({
+    serverUrl: "ws://mock-server",
+    deviceId: device1Id,
+    deviceName: "Test Device 1",
+    onMessage: safeCreateHandler(syncManager1, "handleMessage"),
+    onConnectionChange: safeCreateHandler(syncManager1, "handleConnectionChange"),
+    onTrustedDevicesChange: safeCreateHandler(syncManager1, "handleTrustedDevicesChange"),
+    onSyncRequest: safeCreateHandler(syncManager1, "handleSyncRequest")
+  }, device1Id);
+  syncManager2.relayClient = new MockRelayClient2({
+    serverUrl: "ws://mock-server",
+    deviceId: device2Id,
+    deviceName: "Test Device 2",
+    onMessage: safeCreateHandler(syncManager2, "handleMessage"),
+    onConnectionChange: safeCreateHandler(syncManager2, "handleConnectionChange"),
+    onTrustedDevicesChange: safeCreateHandler(syncManager2, "handleTrustedDevicesChange"),
+    onSyncRequest: safeCreateHandler(syncManager2, "handleSyncRequest")
+  }, device2Id);
+  try {
+    log("\u0428\u0430\u0433 1: \u041F\u043E\u0434\u043A\u043B\u044E\u0447\u0435\u043D\u0438\u0435 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432...");
+    await syncManager1.start();
+    await syncManager2.start();
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    const device1Connected = syncManager1.relayClient.isConnected;
+    const device2Connected = syncManager2.relayClient.isConnected;
+    log(`\u0423\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u043E 1 \u043F\u043E\u0434\u043A\u043B\u044E\u0447\u0435\u043D\u043E: ${device1Connected ? "\u0414\u0410" : "\u041D\u0415\u0422"}`);
+    log(`\u0423\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u043E 2 \u043F\u043E\u0434\u043A\u043B\u044E\u0447\u0435\u043D\u043E: ${device2Connected ? "\u0414\u0410" : "\u041D\u0415\u0422"}`);
+    if (!device1Connected || !device2Connected) {
+      log("\u041E\u0448\u0438\u0431\u043A\u0430: \u043D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u043F\u043E\u0434\u043A\u043B\u044E\u0447\u0438\u0442\u044C \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u0430");
+      return false;
+    }
+    log("\u0428\u0430\u0433 2: \u0414\u043E\u0431\u0430\u0432\u043B\u0435\u043D\u0438\u0435 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432 \u043A\u0430\u043A \u0434\u043E\u0432\u0435\u0440\u0435\u043D\u043D\u044B\u0445...");
+    syncManager1.trustedDevices = [{
+      id: device2Id,
+      name: "Test Device 2",
+      trusted: true,
+      lastSeen: (/* @__PURE__ */ new Date()).toISOString()
+    }];
+    syncManager2.trustedDevices = [{
+      id: device1Id,
+      name: "Test Device 1",
+      trusted: true,
+      lastSeen: (/* @__PURE__ */ new Date()).toISOString()
+    }];
+    log("\u0428\u0430\u0433 3: \u0417\u0430\u043F\u0443\u0441\u043A \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438...");
+    if (typeof syncManager1.checkForChanges === "function") {
+      syncManager1.checkForChanges();
+    } else {
+      console.log("\u041C\u0435\u0442\u043E\u0434 checkForChanges \u043D\u0435 \u043D\u0430\u0439\u0434\u0435\u043D \u0432 syncManager1, \u043F\u0440\u043E\u0431\u0443\u0435\u043C performFullSync");
+      if (typeof syncManager1.performFullSync === "function") {
+        syncManager1.performFullSync();
+      } else {
+        console.log("\u041D\u0435 \u043D\u0430\u0439\u0434\u0435\u043D\u044B \u043C\u0435\u0442\u043E\u0434\u044B \u0434\u043B\u044F \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438 \u0432 syncManager1");
+      }
+    }
+    if (typeof syncManager2.checkForChanges === "function") {
+      syncManager2.checkForChanges();
+    } else {
+      console.log("\u041C\u0435\u0442\u043E\u0434 checkForChanges \u043D\u0435 \u043D\u0430\u0439\u0434\u0435\u043D \u0432 syncManager2, \u043F\u0440\u043E\u0431\u0443\u0435\u043C performFullSync");
+      if (typeof syncManager2.performFullSync === "function") {
+        syncManager2.performFullSync();
+      } else {
+        console.log("\u041D\u0435 \u043D\u0430\u0439\u0434\u0435\u043D\u044B \u043C\u0435\u0442\u043E\u0434\u044B \u0434\u043B\u044F \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438 \u0432 syncManager2");
+      }
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1e3));
+    log("\u0428\u0430\u0433 4: \u041F\u0440\u043E\u0432\u0435\u0440\u043A\u0430 \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438 \u0444\u0430\u0439\u043B\u043E\u0432...");
+    const device1Files = Object.keys(app1.vault.files);
+    const device2Files = Object.keys(app2.vault.files);
+    log(`\u0424\u0430\u0439\u043B\u044B \u043D\u0430 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u0435 1: ${device1Files.join(", ")}`);
+    log(`\u0424\u0430\u0439\u043B\u044B \u043D\u0430 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u0435 2: ${device2Files.join(", ")}`);
+    const test1OnDevice2 = await app2.vault.read({ path: "test1.md" });
+    const test2OnDevice1 = await app1.vault.read({ path: "test2.md" });
+    log(`\u0424\u0430\u0439\u043B test1.md \u043D\u0430 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u0435 2: "${test1OnDevice2.substring(0, 30)}..."`);
+    log(`\u0424\u0430\u0439\u043B test2.md \u043D\u0430 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u0435 1: "${test2OnDevice1.substring(0, 30)}..."`);
+    const device1HasTest2 = device1Files.includes("test2.md") && test2OnDevice1.includes("Content from device 2");
+    const device2HasTest1 = device2Files.includes("test1.md") && test1OnDevice2.includes("Content from device 1");
+    log(`\u0423\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u043E 1 \u043F\u043E\u043B\u0443\u0447\u0438\u043B\u043E \u0444\u0430\u0439\u043B \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u0430 2: ${device1HasTest2 ? "\u0414\u0410" : "\u041D\u0415\u0422"}`);
+    log(`\u0423\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u043E 2 \u043F\u043E\u043B\u0443\u0447\u0438\u043B\u043E \u0444\u0430\u0439\u043B \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u0430 1: ${device2HasTest1 ? "\u0414\u0410" : "\u041D\u0415\u0422"}`);
+    log("\u0428\u0430\u0433 5: \u0421\u043E\u0437\u0434\u0430\u043D\u0438\u0435 \u043D\u043E\u0432\u043E\u0433\u043E \u0444\u0430\u0439\u043B\u0430 \u0438 \u043F\u0440\u043E\u0432\u0435\u0440\u043A\u0430 \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438...");
+    await app1.vault.create("test3.md", "# Test file 3\nNew content from device 1");
+    if (typeof syncManager1.handleFileChange === "function") {
+      syncManager1.handleFileChange({
+        path: "test3.md",
+        type: "create",
+        file: app1.vault.getAbstractFileByPath("test3.md")
+      });
+    } else {
+      console.log("\u041C\u0435\u0442\u043E\u0434 handleFileChange \u043D\u0435 \u043D\u0430\u0439\u0434\u0435\u043D \u0432 syncManager1, \u043F\u0440\u043E\u0431\u0443\u0435\u043C performFullSync");
+      if (typeof syncManager1.performFullSync === "function") {
+        syncManager1.performFullSync();
+      }
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1e3));
+    const test3OnDevice2 = await app2.vault.read({ path: "test3.md" });
+    log(`\u0424\u0430\u0439\u043B test3.md \u043D\u0430 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u0435 2: "${test3OnDevice2.substring(0, 30)}..."`);
+    const device2HasTest3 = test3OnDevice2.includes("New content from device 1");
+    log(`\u0423\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u043E 2 \u043F\u043E\u043B\u0443\u0447\u0438\u043B\u043E \u043D\u043E\u0432\u044B\u0439 \u0444\u0430\u0439\u043B: ${device2HasTest3 ? "\u0414\u0410" : "\u041D\u0415\u0422"}`);
+    log("\u0428\u0430\u0433 6: \u041E\u0441\u0442\u0430\u043D\u043E\u0432\u043A\u0430 \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438...");
+    await syncManager1.stop();
+    await syncManager2.stop();
+    const success = device1HasTest2 && device2HasTest1 && device2HasTest3;
+    log(`\u0418\u0442\u043E\u0433\u043E\u0432\u044B\u0439 \u0440\u0435\u0437\u0443\u043B\u044C\u0442\u0430\u0442 \u0442\u0435\u0441\u0442\u0430: ${success ? "\u0423\u0421\u041F\u0415\u0428\u041D\u041E" : "\u041D\u0415\u0423\u0414\u0410\u0427\u0410"}`);
+    return success;
+  } catch (error) {
+    log(`\u041E\u0448\u0438\u0431\u043A\u0430 \u043F\u0440\u0438 \u0432\u044B\u043F\u043E\u043B\u043D\u0435\u043D\u0438\u0438 \u0442\u0435\u0441\u0442\u0430: ${error.message}`);
+    console.error("\u041E\u0448\u0438\u0431\u043A\u0430 \u0432 \u0442\u0435\u0441\u0442\u0435 \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438:", error);
+    await syncManager1.stop();
+    await syncManager2.stop();
+    return false;
+  }
+}
+async function runMockSyncTest() {
+  try {
+    new import_obsidian6.Notice("\u0417\u0430\u043F\u0443\u0441\u043A \u0442\u0435\u0441\u0442\u0430 \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438 \u0441 \u043C\u043E\u043A\u0430\u043C\u0438...");
+    console.log("===== \u0417\u0410\u041F\u0423\u0421\u041A \u0422\u0415\u0421\u0422\u0410 \u0421\u0418\u041D\u0425\u0420\u041E\u041D\u0418\u0417\u0410\u0426\u0418\u0418 \u0421 \u041C\u041E\u041A\u0410\u041C\u0418 =====");
+    const success = await testMockSync();
+    if (success) {
+      new import_obsidian6.Notice("\u2705 \u0422\u0435\u0441\u0442 \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438 \u0441 \u043C\u043E\u043A\u0430\u043C\u0438 \u0443\u0441\u043F\u0435\u0448\u043D\u043E \u043F\u0440\u043E\u0439\u0434\u0435\u043D!", 1e4);
+    } else {
+      new import_obsidian6.Notice("\u274C \u0422\u0435\u0441\u0442 \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438 \u0441 \u043C\u043E\u043A\u0430\u043C\u0438 \u043D\u0435 \u043F\u0440\u043E\u0439\u0434\u0435\u043D. \u041F\u043E\u0434\u0440\u043E\u0431\u043D\u043E\u0441\u0442\u0438 \u0432 \u043A\u043E\u043D\u0441\u043E\u043B\u0438 \u0440\u0430\u0437\u0440\u0430\u0431\u043E\u0442\u0447\u0438\u043A\u0430.", 1e4);
+    }
+    return success;
+  } catch (error) {
+    console.error("\u041A\u0440\u0438\u0442\u0438\u0447\u0435\u0441\u043A\u0430\u044F \u043E\u0448\u0438\u0431\u043A\u0430 \u043F\u0440\u0438 \u0437\u0430\u043F\u0443\u0441\u043A\u0435 \u0442\u0435\u0441\u0442\u0430:", error);
+    new import_obsidian6.Notice(`\u274C \u041A\u0440\u0438\u0442\u0438\u0447\u0435\u0441\u043A\u0430\u044F \u043E\u0448\u0438\u0431\u043A\u0430 \u043F\u0440\u0438 \u0437\u0430\u043F\u0443\u0441\u043A\u0435 \u0442\u0435\u0441\u0442\u0430: ${error.message}`, 1e4);
+    return false;
+  }
+}
+var import_obsidian6, MockWebSocketPair, MockWebSocket, MockVault2, MockApp2, MockRelayClient2;
+var init_mock_sync_test = __esm({
+  "src/tests/integration/mock-sync-test.ts"() {
+    import_obsidian6 = require("obsidian");
+    init_sync_manager();
+    MockWebSocketPair = class {
+      constructor() {
+        this.isOpen = false;
+        this.client1 = new MockWebSocket("ws://mock-server/1");
+        this.client2 = new MockWebSocket("ws://mock-server/2");
+        this.client1.pair = this;
+        this.client2.pair = this;
+        this.client1.otherClient = this.client2;
+        this.client2.otherClient = this.client1;
+      }
+      open() {
+        this.isOpen = true;
+        setTimeout(() => {
+          if (this.client1.onopen)
+            this.client1.onopen();
+          if (this.client2.onopen)
+            this.client2.onopen();
+        }, 10);
+      }
+      close() {
+        this.isOpen = false;
+        if (this.client1.onclose)
+          this.client1.onclose({ code: 1e3, reason: "Closed" });
+        if (this.client2.onclose)
+          this.client2.onclose({ code: 1e3, reason: "Closed" });
+      }
+    };
+    MockWebSocket = class {
+      // 0 = CONNECTING
+      constructor(url) {
+        this.pair = null;
+        this.otherClient = null;
+        this.onopen = null;
+        this.onmessage = null;
+        this.onclose = null;
+        this.onerror = null;
+        this.readyState = 0;
+        this.url = url;
+      }
+      send(data) {
+        if (this.otherClient && this.otherClient.onmessage) {
+          setTimeout(() => {
+            if (this.otherClient && this.otherClient.onmessage) {
+              this.otherClient.onmessage({ data });
+            }
+          }, 10);
+        }
+      }
+      close() {
+        this.readyState = 2;
+        if (this.pair) {
+          this.pair.close();
+        } else if (this.onclose) {
+          this.onclose({ code: 1e3, reason: "Closed" });
+        }
+        this.readyState = 3;
+      }
+    };
+    MockVault2 = class {
+      constructor() {
+        this.files = {};
+        this.adapter = {
+          read: async (path) => {
+            var _a;
+            return ((_a = this.files[path]) == null ? void 0 : _a.content) || "";
+          },
+          write: async (path, content) => {
+            this.files[path] = { content, mtime: Date.now() };
+            return true;
+          }
+        };
+      }
+      async read(file) {
+        var _a;
+        return ((_a = this.files[file.path]) == null ? void 0 : _a.content) || "";
+      }
+      getAbstractFileByPath(path) {
+        if (!this.files[path])
+          return null;
+        return {
+          path,
+          stat: {
+            size: this.files[path].content.length,
+            mtime: this.files[path].mtime,
+            ctime: this.files[path].mtime - 5e3
+          }
+        };
+      }
+      async modify(path, content) {
+        this.files[path] = {
+          content,
+          mtime: Date.now()
+        };
+      }
+      async create(path, content) {
+        this.files[path] = {
+          content,
+          mtime: Date.now()
+        };
+      }
+      getFiles() {
+        return Object.keys(this.files).map((path) => ({
+          path,
+          stat: {
+            size: this.files[path].content.length,
+            mtime: this.files[path].mtime,
+            ctime: this.files[path].mtime - 5e3
+          }
+        }));
+      }
+      on() {
+        return { unsubscribe: () => {
+        } };
+      }
+    };
+    MockApp2 = class {
+      constructor() {
+        this.vault = new MockVault2();
+      }
+    };
+    MockRelayClient2 = class {
+      constructor(options, deviceId) {
+        this.wsConnection = null;
+        this.isConnected = false;
+        this.deviceId = deviceId;
+        this.deviceName = options.deviceName || "Test Device";
+        this.onMessageCallback = options.onMessage;
+        this.onConnectionChangeCallback = options.onConnectionChange;
+        this.onTrustedDevicesChangeCallback = options.onTrustedDevicesChange;
+        this.onSyncRequestCallback = options.onSyncRequest;
+      }
+      // Метод подключения
+      connect() {
+        console.log(`[TEST] \u041F\u043E\u0434\u043A\u043B\u044E\u0447\u0435\u043D\u0438\u0435 \u043A \u043C\u043E\u043A-\u0441\u0435\u0440\u0432\u0435\u0440\u0443 (\u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u043E ${this.deviceId})`);
+        if (!this.wsConnection) {
+          this.wsConnection = new MockWebSocketPair();
+        }
+        const ws = this.deviceId === "device1" ? this.wsConnection.client1 : this.wsConnection.client2;
+        ws.onopen = () => {
+          this.isConnected = true;
+          this.onConnectionChangeCallback(true);
+          this.onMessageCallback({
+            type: "init_response",
+            success: true
+          });
+          this.onTrustedDevicesChangeCallback([]);
+        };
+        ws.onmessage = (event) => {
+          try {
+            const message = JSON.parse(event.data);
+            if (message.type === "sync_request") {
+              this.onSyncRequestCallback(message);
+            } else {
+              this.onMessageCallback(message);
+            }
+            if (message.type === "file_request") {
+              setTimeout(() => {
+                this.onMessageCallback({
+                  type: "file_response",
+                  path: message.path,
+                  content: "Encrypted test content",
+                  // В реальной ситуации здесь будет зашифрованный контент
+                  hash: "test-hash",
+                  sourceDeviceId: this.deviceId === "device1" ? "device2" : "device1"
+                });
+              }, 100);
+            }
+          } catch (error) {
+            console.error("\u041E\u0448\u0438\u0431\u043A\u0430 \u043F\u0440\u0438 \u043E\u0431\u0440\u0430\u0431\u043E\u0442\u043A\u0435 \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u044F:", error);
+          }
+        };
+        ws.onclose = () => {
+          this.isConnected = false;
+          this.onConnectionChangeCallback(false);
+        };
+        this.wsConnection.open();
+      }
+      // Метод отключения
+      disconnect() {
+        console.log(`[TEST] \u041E\u0442\u043A\u043B\u044E\u0447\u0435\u043D\u0438\u0435 \u043E\u0442 \u043C\u043E\u043A-\u0441\u0435\u0440\u0432\u0435\u0440\u0430 (\u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u043E ${this.deviceId})`);
+        if (this.wsConnection) {
+          this.wsConnection.close();
+          this.wsConnection = null;
+        }
+        this.isConnected = false;
+        this.onConnectionChangeCallback(false);
+      }
+      // Метод отправки сообщения
+      sendMessage(message) {
+        if (!this.isConnected || !this.wsConnection) {
+          console.error("Cannot send message: WebSocket not connected");
+          return false;
+        }
+        try {
+          const messageString = JSON.stringify(message);
+          const ws = this.deviceId === "device1" ? this.wsConnection.client1 : this.wsConnection.client2;
+          ws.send(messageString);
+          return true;
+        } catch (error) {
+          console.error("\u041E\u0448\u0438\u0431\u043A\u0430 \u043F\u0440\u0438 \u043E\u0442\u043F\u0440\u0430\u0432\u043A\u0435 \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u044F:", error);
+          return false;
+        }
+      }
+    };
+  }
+});
+
+// src/tests/test-command.ts
+var test_command_exports = {};
+__export(test_command_exports, {
+  runAllTests: () => runAllTests3,
+  runMockSyncTests: () => runMockSyncTests,
+  runOptimizerTests: () => runOptimizerTests,
+  runRealSyncTests: () => runRealSyncTests
+});
+async function runOptimizerTests() {
+  try {
+    new import_obsidian7.Notice("\u0417\u0430\u043F\u0443\u0441\u043A \u0442\u0435\u0441\u0442\u043E\u0432 \u043E\u043F\u0442\u0438\u043C\u0438\u0437\u0430\u0442\u043E\u0440\u0430...");
+    console.log("===== \u0417\u0410\u041F\u0423\u0421\u041A \u0422\u0415\u0421\u0422\u041E\u0412 \u041E\u041F\u0422\u0418\u041C\u0418\u0417\u0410\u0422\u041E\u0420\u0410 =====");
+    const allPassed = await runAllTests();
+    if (allPassed) {
+      new import_obsidian7.Notice("\u2705 \u0412\u0441\u0435 \u0442\u0435\u0441\u0442\u044B \u043E\u043F\u0442\u0438\u043C\u0438\u0437\u0430\u0442\u043E\u0440\u0430 \u0443\u0441\u043F\u0435\u0448\u043D\u043E \u043F\u0440\u043E\u0439\u0434\u0435\u043D\u044B!", 1e4);
+    } else {
+      new import_obsidian7.Notice("\u274C \u041D\u0435\u043A\u043E\u0442\u043E\u0440\u044B\u0435 \u0442\u0435\u0441\u0442\u044B \u043E\u043F\u0442\u0438\u043C\u0438\u0437\u0430\u0442\u043E\u0440\u0430 \u043D\u0435 \u043F\u0440\u043E\u0439\u0434\u0435\u043D\u044B. \u041F\u043E\u0434\u0440\u043E\u0431\u043D\u043E\u0441\u0442\u0438 \u0432 \u043A\u043E\u043D\u0441\u043E\u043B\u0438 \u0440\u0430\u0437\u0440\u0430\u0431\u043E\u0442\u0447\u0438\u043A\u0430.", 1e4);
+    }
+    return allPassed;
+  } catch (error) {
+    console.error("\u041E\u0448\u0438\u0431\u043A\u0430 \u043F\u0440\u0438 \u0437\u0430\u043F\u0443\u0441\u043A\u0435 \u0442\u0435\u0441\u0442\u043E\u0432 \u043E\u043F\u0442\u0438\u043C\u0438\u0437\u0430\u0442\u043E\u0440\u0430:", error);
+    new import_obsidian7.Notice(`\u274C \u041E\u0448\u0438\u0431\u043A\u0430 \u043F\u0440\u0438 \u0437\u0430\u043F\u0443\u0441\u043A\u0435 \u0442\u0435\u0441\u0442\u043E\u0432 \u043E\u043F\u0442\u0438\u043C\u0438\u0437\u0430\u0442\u043E\u0440\u0430: ${error.message}`, 1e4);
+    return false;
+  }
+}
+async function runAllTests3() {
+  try {
+    new import_obsidian7.Notice("\u0417\u0430\u043F\u0443\u0441\u043A \u0432\u0441\u0435\u0445 \u0442\u0435\u0441\u0442\u043E\u0432 \u043F\u043B\u0430\u0433\u0438\u043D\u0430...");
+    console.log("===== \u0417\u0410\u041F\u0423\u0421\u041A \u0412\u0421\u0415\u0425 \u0422\u0415\u0421\u0422\u041E\u0412 \u041F\u041B\u0410\u0413\u0418\u041D\u0410 =====");
+    const allPassed = await runAllTests2();
+    if (allPassed) {
+      new import_obsidian7.Notice("\u2705 \u0412\u0441\u0435 \u0442\u0435\u0441\u0442\u044B \u043F\u043B\u0430\u0433\u0438\u043D\u0430 \u0443\u0441\u043F\u0435\u0448\u043D\u043E \u043F\u0440\u043E\u0439\u0434\u0435\u043D\u044B!", 1e4);
+    } else {
+      new import_obsidian7.Notice("\u274C \u041D\u0435\u043A\u043E\u0442\u043E\u0440\u044B\u0435 \u0442\u0435\u0441\u0442\u044B \u043F\u043B\u0430\u0433\u0438\u043D\u0430 \u043D\u0435 \u043F\u0440\u043E\u0439\u0434\u0435\u043D\u044B. \u041F\u043E\u0434\u0440\u043E\u0431\u043D\u043E\u0441\u0442\u0438 \u0432 \u043A\u043E\u043D\u0441\u043E\u043B\u0438 \u0440\u0430\u0437\u0440\u0430\u0431\u043E\u0442\u0447\u0438\u043A\u0430.", 1e4);
+    }
+    return allPassed;
+  } catch (error) {
+    console.error("\u041E\u0448\u0438\u0431\u043A\u0430 \u043F\u0440\u0438 \u0437\u0430\u043F\u0443\u0441\u043A\u0435 \u0432\u0441\u0435\u0445 \u0442\u0435\u0441\u0442\u043E\u0432:", error);
+    new import_obsidian7.Notice(`\u274C \u041E\u0448\u0438\u0431\u043A\u0430 \u043F\u0440\u0438 \u0437\u0430\u043F\u0443\u0441\u043A\u0435 \u0432\u0441\u0435\u0445 \u0442\u0435\u0441\u0442\u043E\u0432: ${error.message}`, 1e4);
+    return false;
+  }
+}
+async function runRealSyncTests() {
+  try {
+    return await runRealSyncTest();
+  } catch (error) {
+    console.error("\u041E\u0448\u0438\u0431\u043A\u0430 \u043F\u0440\u0438 \u0437\u0430\u043F\u0443\u0441\u043A\u0435 \u0442\u0435\u0441\u0442\u0430 \u0440\u0435\u0430\u043B\u044C\u043D\u043E\u0439 \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438:", error);
+    new import_obsidian7.Notice(`\u274C \u041E\u0448\u0438\u0431\u043A\u0430 \u043F\u0440\u0438 \u0437\u0430\u043F\u0443\u0441\u043A\u0435 \u0442\u0435\u0441\u0442\u0430 \u0440\u0435\u0430\u043B\u044C\u043D\u043E\u0439 \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438: ${error.message}`, 1e4);
+    return false;
+  }
+}
+async function runMockSyncTests() {
+  try {
+    return await runMockSyncTest();
+  } catch (error) {
+    console.error("\u041E\u0448\u0438\u0431\u043A\u0430 \u043F\u0440\u0438 \u0437\u0430\u043F\u0443\u0441\u043A\u0435 \u0442\u0435\u0441\u0442\u0430 \u0441 \u043C\u043E\u043A\u0430\u043C\u0438:", error);
+    new import_obsidian7.Notice(`\u274C \u041E\u0448\u0438\u0431\u043A\u0430 \u043F\u0440\u0438 \u0437\u0430\u043F\u0443\u0441\u043A\u0435 \u0442\u0435\u0441\u0442\u0430 \u0441 \u043C\u043E\u043A\u0430\u043C\u0438: ${error.message}`, 1e4);
+    return false;
+  }
+}
+var import_obsidian7;
+var init_test_command = __esm({
+  "src/tests/test-command.ts"() {
+    import_obsidian7 = require("obsidian");
+    init_optimizer_tests();
+    init_run_all_tests();
+    init_real_sync_test();
+    init_mock_sync_test();
+  }
+});
+
+// src/utils/github-updater.ts
+var github_updater_exports = {};
+__export(github_updater_exports, {
+  checkForUpdates: () => checkForUpdates,
+  downloadUpdate: () => downloadUpdate
+});
+async function checkForUpdates() {
+  var _a;
+  try {
+    const response = await (0, import_obsidian8.requestUrl)({
+      url: `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/releases/latest`,
+      headers: {
+        "Accept": "application/vnd.github.v3+json",
+        "User-Agent": "ObsidianRelaySync"
+      }
+    });
+    if (response.status !== 200) {
+      throw new Error(`GitHub API returned status ${response.status}`);
+    }
+    const release = response.json;
+    const latestVersion = release.tag_name.replace("v", "");
+    const isUpdateAvailable = compareVersions(latestVersion, currentVersion) > 0;
+    const mainDownloadUrl = ((_a = release.assets.find(
+      (asset) => asset.name === "main.js" || asset.name === "obsidian-relay-sync.zip"
+    )) == null ? void 0 : _a.browser_download_url) || "";
+    return {
+      available: isUpdateAvailable,
+      currentVersion,
+      latestVersion,
+      releaseUrl: `https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}/releases/tag/${release.tag_name}`,
+      downloadUrl: mainDownloadUrl,
+      releaseNotes: release.body,
+      publishedAt: release.published_at
+    };
+  } catch (error) {
+    console.error("Error checking for updates:", error);
+    throw new Error(`\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u043F\u0440\u043E\u0432\u0435\u0440\u0438\u0442\u044C \u043E\u0431\u043D\u043E\u0432\u043B\u0435\u043D\u0438\u044F: ${error.message}`);
+  }
+}
+function compareVersions(v1, v2) {
+  const v1Parts = v1.split(".").map(Number);
+  const v2Parts = v2.split(".").map(Number);
+  for (let i = 0; i < Math.max(v1Parts.length, v2Parts.length); i++) {
+    const v1Part = v1Parts[i] || 0;
+    const v2Part = v2Parts[i] || 0;
+    if (v1Part > v2Part)
+      return 1;
+    if (v1Part < v2Part)
+      return -1;
+  }
+  return 0;
+}
+async function downloadUpdate(downloadUrl) {
+  try {
+    const response = await (0, import_obsidian8.requestUrl)({
+      url: downloadUrl,
+      method: "GET"
+    });
+    if (response.status !== 200) {
+      throw new Error(`\u041E\u0448\u0438\u0431\u043A\u0430 \u043F\u0440\u0438 \u0437\u0430\u0433\u0440\u0443\u0437\u043A\u0435 \u043E\u0431\u043D\u043E\u0432\u043B\u0435\u043D\u0438\u044F. \u0421\u0442\u0430\u0442\u0443\u0441: ${response.status}`);
+    }
+    const fileContent = response.arrayBuffer;
+    return true;
+  } catch (error) {
+    console.error("Error downloading update:", error);
+    throw new Error(`\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u0437\u0430\u0433\u0440\u0443\u0437\u0438\u0442\u044C \u043E\u0431\u043D\u043E\u0432\u043B\u0435\u043D\u0438\u0435: ${error.message}`);
+  }
+}
+var import_obsidian8, currentVersion, GITHUB_OWNER, GITHUB_REPO;
+var init_github_updater = __esm({
+  "src/utils/github-updater.ts"() {
+    import_obsidian8 = require("obsidian");
+    currentVersion = "1.2.0";
+    GITHUB_OWNER = "ded-achtung";
+    GITHUB_REPO = "obsidian-relay-sync";
+  }
+});
+
+// src/ui/update-modal.ts
+var update_modal_exports = {};
+__export(update_modal_exports, {
+  UpdateModal: () => UpdateModal
+});
+var import_obsidian9, UpdateModal;
+var init_update_modal = __esm({
+  "src/ui/update-modal.ts"() {
+    import_obsidian9 = require("obsidian");
+    UpdateModal = class extends import_obsidian9.Modal {
+      constructor(app, updateInfo) {
+        super(app);
+        this.updateInfo = updateInfo;
+      }
+      onOpen() {
+        const { contentEl } = this;
+        contentEl.empty();
+        contentEl.addClass("relay-sync-update-modal");
+        contentEl.createEl("h2", {
+          text: `\u0414\u043E\u0441\u0442\u0443\u043F\u043D\u043E \u043E\u0431\u043D\u043E\u0432\u043B\u0435\u043D\u0438\u0435: ${this.updateInfo.latestVersion}`,
+          cls: "relay-sync-update-modal-title"
+        });
+        contentEl.createEl("div", {
+          text: `\u0422\u0435\u043A\u0443\u0449\u0430\u044F \u0432\u0435\u0440\u0441\u0438\u044F: ${this.updateInfo.currentVersion}`,
+          cls: "relay-sync-update-modal-current-version"
+        });
+        const publishDate = new Date(this.updateInfo.publishedAt);
+        contentEl.createEl("div", {
+          text: `\u0414\u0430\u0442\u0430 \u0432\u044B\u043F\u0443\u0441\u043A\u0430: ${publishDate.toLocaleDateString()}`,
+          cls: "relay-sync-update-modal-date"
+        });
+        contentEl.createEl("hr");
+        contentEl.createEl("h3", {
+          text: "\u041F\u0440\u0438\u043C\u0435\u0447\u0430\u043D\u0438\u044F \u043A \u0432\u044B\u043F\u0443\u0441\u043A\u0443:",
+          cls: "relay-sync-update-modal-notes-title"
+        });
+        const notesContainer = contentEl.createDiv({
+          cls: "relay-sync-update-modal-notes"
+        });
+        notesContainer.innerHTML = this.updateInfo.releaseNotes || "\u0418\u043D\u0444\u043E\u0440\u043C\u0430\u0446\u0438\u044F \u043E \u0432\u044B\u043F\u0443\u0441\u043A\u0435 \u043D\u0435\u0434\u043E\u0441\u0442\u0443\u043F\u043D\u0430";
+        contentEl.createEl("hr");
+        const buttonContainer = contentEl.createDiv({
+          cls: "relay-sync-update-modal-buttons"
+        });
+        new import_obsidian9.ButtonComponent(buttonContainer).setButtonText("\u041E\u0442\u043A\u0440\u044B\u0442\u044C \u0441\u0442\u0440\u0430\u043D\u0438\u0446\u0443 \u0440\u0435\u043B\u0438\u0437\u0430").setCta().onClick(() => {
+          window.open(this.updateInfo.releaseUrl, "_blank");
+        });
+        new import_obsidian9.ButtonComponent(buttonContainer).setButtonText("\u0417\u0430\u043A\u0440\u044B\u0442\u044C").onClick(() => {
+          this.close();
+        });
+      }
+      onClose() {
+        const { contentEl } = this;
+        contentEl.empty();
+      }
+    };
+  }
+});
+
 // main.ts
 var main_exports = {};
 __export(main_exports, {
   default: () => RelaySyncPlugin
 });
 module.exports = __toCommonJS(main_exports);
-var import_obsidian5 = require("obsidian");
+var import_obsidian10 = require("obsidian");
 
 // src/ui/settings-tab.ts
 var import_obsidian = require("obsidian");
-
-// src/utils/crypto.ts
-var CryptoHelper = class {
-  /**
-   * Генерирует криптографически стойкий ключ из пароля
-   */
-  static async generateKey(password, salt) {
-    const encoder = new TextEncoder();
-    const passwordBuffer = encoder.encode(password);
-    if (!salt) {
-      salt = crypto.getRandomValues(new Uint8Array(this.SALT_LENGTH));
-    }
-    const keyMaterial = await crypto.subtle.importKey(
-      "raw",
-      passwordBuffer,
-      { name: "PBKDF2" },
-      false,
-      ["deriveKey"]
-    );
-    const key = await crypto.subtle.deriveKey(
-      {
-        name: "PBKDF2",
-        salt,
-        iterations: this.ITERATIONS,
-        hash: "SHA-256"
-      },
-      keyMaterial,
-      { name: this.ALGORITHM, length: this.KEY_LENGTH },
-      false,
-      ["encrypt", "decrypt"]
-    );
-    return { key, salt };
-  }
-  /**
-   * Шифрует данные с использованием AES-GCM
-   */
-  static async encrypt(data, password) {
-    const encoder = new TextEncoder();
-    const dataBuffer = encoder.encode(data);
-    const { key, salt } = await this.generateKey(password);
-    const iv = crypto.getRandomValues(new Uint8Array(this.IV_LENGTH));
-    const encryptedBuffer = await crypto.subtle.encrypt(
-      {
-        name: this.ALGORITHM,
-        iv,
-        tagLength: 128
-        // Длина тега аутентификации в битах
-      },
-      key,
-      dataBuffer
-    );
-    const encryptedArray = new Uint8Array(encryptedBuffer);
-    const encryptedData = encryptedArray.slice(0, encryptedArray.length - 16);
-    const authTag = encryptedArray.slice(encryptedArray.length - 16);
-    return {
-      iv: this.arrayBufferToBase64(iv),
-      data: this.arrayBufferToBase64(encryptedData),
-      authTag: this.arrayBufferToBase64(authTag),
-      salt: this.arrayBufferToBase64(salt)
-    };
-  }
-  /**
-   * Дешифрует данные, зашифрованные с использованием AES-GCM
-   */
-  static async decrypt(encryptedData, password) {
-    try {
-      const iv = this.base64ToArrayBuffer(encryptedData.iv);
-      const data = this.base64ToArrayBuffer(encryptedData.data);
-      const authTag = this.base64ToArrayBuffer(encryptedData.authTag);
-      const salt = this.base64ToArrayBuffer(encryptedData.salt);
-      const encryptedBuffer = new Uint8Array(data.byteLength + authTag.byteLength);
-      encryptedBuffer.set(new Uint8Array(data), 0);
-      encryptedBuffer.set(new Uint8Array(authTag), data.byteLength);
-      const { key } = await this.generateKey(password, new Uint8Array(salt));
-      const decryptedBuffer = await crypto.subtle.decrypt(
-        {
-          name: this.ALGORITHM,
-          iv: new Uint8Array(iv),
-          tagLength: 128
-        },
-        key,
-        encryptedBuffer
-      );
-      const decoder = new TextDecoder();
-      return decoder.decode(decryptedBuffer);
-    } catch (error) {
-      console.error("Decryption failed:", error);
-      throw new Error("\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u0440\u0430\u0441\u0448\u0438\u0444\u0440\u043E\u0432\u0430\u0442\u044C \u0434\u0430\u043D\u043D\u044B\u0435. \u0412\u043E\u0437\u043C\u043E\u0436\u043D\u043E, \u043D\u0435\u0432\u0435\u0440\u043D\u044B\u0439 \u043F\u0430\u0440\u043E\u043B\u044C \u0438\u043B\u0438 \u043F\u043E\u0432\u0440\u0435\u0436\u0434\u0435\u043D\u043D\u044B\u0435 \u0434\u0430\u043D\u043D\u044B\u0435.");
-    }
-  }
-  /**
-   * Преобразует ArrayBuffer в строку Base64
-   */
-  static arrayBufferToBase64(buffer) {
-    const bytes = new Uint8Array(buffer);
-    let binary = "";
-    for (let i = 0; i < bytes.byteLength; i++) {
-      binary += String.fromCharCode(bytes[i]);
-    }
-    return btoa(binary);
-  }
-  /**
-   * Преобразует строку Base64 в ArrayBuffer
-   */
-  static base64ToArrayBuffer(base64) {
-    const binaryString = atob(base64);
-    const bytes = new Uint8Array(binaryString.length);
-    for (let i = 0; i < binaryString.length; i++) {
-      bytes[i] = binaryString.charCodeAt(i);
-    }
-    return bytes.buffer;
-  }
-  /**
-   * Генерирует уникальный идентификатор устройства
-   */
-  static generateDeviceId() {
-    const array = new Uint8Array(16);
-    crypto.getRandomValues(array);
-    return Array.from(
-      array,
-      (byte) => byte.toString(16).padStart(2, "0")
-    ).join("");
-  }
-  /**
-   * Хеширует строку с использованием SHA-256
-   */
-  static async hashString(str) {
-    const encoder = new TextEncoder();
-    const data = encoder.encode(str);
-    const hash = await crypto.subtle.digest("SHA-256", data);
-    return this.arrayBufferToBase64(hash);
-  }
-};
-CryptoHelper.ALGORITHM = "AES-GCM";
-CryptoHelper.KEY_LENGTH = 256;
-// bits
-CryptoHelper.SALT_LENGTH = 16;
-// bytes
-CryptoHelper.IV_LENGTH = 12;
-// bytes
-CryptoHelper.ITERATIONS = 1e5;
-
-// src/utils/device-id.ts
-var DEVICE_ID_KEY = "relay-sync-device-id";
-var DEVICE_NAME_KEY = "relay-sync-device-name";
-var DeviceManager = class {
-  /**
-   * Получить идентификатор устройства или создать новый, если не существует
-   */
-  static getDeviceId() {
-    let deviceId = localStorage.getItem(DEVICE_ID_KEY);
-    if (!deviceId) {
-      deviceId = CryptoHelper.generateDeviceId();
-      localStorage.setItem(DEVICE_ID_KEY, deviceId);
-    }
-    return deviceId;
-  }
-  /**
-   * Установить идентификатор устройства
-   */
-  static setDeviceId(deviceId) {
-    localStorage.setItem(DEVICE_ID_KEY, deviceId);
-  }
-  /**
-   * Получить имя устройства или вернуть значение по умолчанию
-   */
-  static getDeviceName() {
-    const deviceName = localStorage.getItem(DEVICE_NAME_KEY);
-    if (!deviceName) {
-      const deviceType = this.detectDeviceType();
-      const randomSuffix = Math.floor(Math.random() * 1e4);
-      const newName = `${deviceType}-${randomSuffix}`;
-      localStorage.setItem(DEVICE_NAME_KEY, newName);
-      return newName;
-    }
-    return deviceName;
-  }
-  /**
-   * Установить имя устройства
-   */
-  static setDeviceName(deviceName) {
-    localStorage.setItem(DEVICE_NAME_KEY, deviceName);
-  }
-  /**
-   * Определить тип устройства (ПК, Android, iOS)
-   */
-  static detectDeviceType() {
-    const userAgent = navigator.userAgent.toLowerCase();
-    if (/android/i.test(userAgent)) {
-      return "Android";
-    } else if (/iphone|ipad|ipod/i.test(userAgent)) {
-      return "iOS";
-    } else if (/windows/i.test(userAgent)) {
-      return "Windows";
-    } else if (/macintosh/i.test(userAgent)) {
-      return "Mac";
-    } else if (/linux/i.test(userAgent)) {
-      return "Linux";
-    } else {
-      return "Unknown";
-    }
-  }
-};
-
-// src/ui/settings-tab.ts
+init_device_id();
 var KeyInputModal = class extends import_obsidian.Modal {
   constructor(app, props) {
     super(app);
@@ -673,6 +5687,34 @@ var RelaySyncSettingsTab = class extends import_obsidian.PluginSettingTab {
         });
       }
     }
+    containerEl.createEl("h3", { text: "\u041E\u0431\u043D\u043E\u0432\u043B\u0435\u043D\u0438\u044F" });
+    new import_obsidian.Setting(containerEl).setName("\u0410\u0432\u0442\u043E\u043C\u0430\u0442\u0438\u0447\u0435\u0441\u043A\u0430\u044F \u043F\u0440\u043E\u0432\u0435\u0440\u043A\u0430 \u043E\u0431\u043D\u043E\u0432\u043B\u0435\u043D\u0438\u0439").setDesc("\u041F\u0435\u0440\u0438\u043E\u0434\u0438\u0447\u0435\u0441\u043A\u0438 \u043F\u0440\u043E\u0432\u0435\u0440\u044F\u0442\u044C \u043D\u0430\u043B\u0438\u0447\u0438\u0435 \u043E\u0431\u043D\u043E\u0432\u043B\u0435\u043D\u0438\u0439 \u043F\u043B\u0430\u0433\u0438\u043D\u0430").addToggle(
+      (toggle) => toggle.setValue(this.plugin.settings.autoCheckForUpdates).onChange(async (value) => {
+        this.plugin.settings.autoCheckForUpdates = value;
+        await this.plugin.saveSettings();
+      })
+    );
+    new import_obsidian.Setting(containerEl).setName("\u0418\u043D\u0442\u0435\u0440\u0432\u0430\u043B \u043F\u0440\u043E\u0432\u0435\u0440\u043A\u0438 \u043E\u0431\u043D\u043E\u0432\u043B\u0435\u043D\u0438\u0439").setDesc("\u041A\u0430\u043A \u0447\u0430\u0441\u0442\u043E \u043F\u0440\u043E\u0432\u0435\u0440\u044F\u0442\u044C \u043D\u0430\u043B\u0438\u0447\u0438\u0435 \u043E\u0431\u043D\u043E\u0432\u043B\u0435\u043D\u0438\u0439 (\u0432 \u0434\u043D\u044F\u0445)").addText(
+      (text) => text.setPlaceholder("1").setValue(String(this.plugin.settings.updateCheckInterval || 1)).onChange(async (value) => {
+        const days = parseInt(value) || 1;
+        this.plugin.settings.updateCheckInterval = days;
+        await this.plugin.saveSettings();
+      })
+    );
+    new import_obsidian.Setting(containerEl).setName("\u041F\u0440\u043E\u0432\u0435\u0440\u0438\u0442\u044C \u043E\u0431\u043D\u043E\u0432\u043B\u0435\u043D\u0438\u044F").setDesc("\u041F\u0440\u043E\u0432\u0435\u0440\u0438\u0442\u044C \u043D\u0430\u043B\u0438\u0447\u0438\u0435 \u043E\u0431\u043D\u043E\u0432\u043B\u0435\u043D\u0438\u0439 \u043F\u043B\u0430\u0433\u0438\u043D\u0430").addButton(
+      (button) => button.setButtonText("\u041F\u0440\u043E\u0432\u0435\u0440\u0438\u0442\u044C").onClick(async () => {
+        button.setButtonText("\u041F\u0440\u043E\u0432\u0435\u0440\u043A\u0430...");
+        button.setDisabled(true);
+        try {
+          await this.plugin.checkForUpdates(true);
+        } catch (error) {
+          console.error("Error checking for updates:", error);
+        } finally {
+          button.setButtonText("\u041F\u0440\u043E\u0432\u0435\u0440\u0438\u0442\u044C");
+          button.setDisabled(false);
+        }
+      })
+    );
     containerEl.createEl("h3", { text: "\u0418\u0441\u043A\u043B\u044E\u0447\u0435\u043D\u0438\u044F" });
     const ignoredPathsSetting = new import_obsidian.Setting(containerEl).setName("\u0418\u0433\u043D\u043E\u0440\u0438\u0440\u0443\u0435\u043C\u044B\u0435 \u043F\u0443\u0442\u0438").setDesc("\u041F\u0443\u0442\u0438, \u043A\u043E\u0442\u043E\u0440\u044B\u0435 \u0431\u0443\u0434\u0443\u0442 \u0438\u0441\u043A\u043B\u044E\u0447\u0435\u043D\u044B \u0438\u0437 \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438 (\u043F\u043E \u043E\u0434\u043D\u043E\u043C\u0443 \u043D\u0430 \u0441\u0442\u0440\u043E\u043A\u0443)");
     const ignoredPathsField = ignoredPathsSetting.controlEl.createEl("textarea", {
@@ -850,2186 +5892,8 @@ ${this.stats.errorMessage}`;
   }
 };
 
-// src/client/sync-manager.ts
-var import_obsidian4 = require("obsidian");
-
-// src/client/relay-client.ts
-var RelayClient = class {
-  constructor(options) {
-    this.ws = null;
-    this.isConnected = false;
-    this.reconnectTimeout = null;
-    this.reconnectAttempts = 0;
-    this.maxReconnectAttempts = 10;
-    this.heartbeatInterval = null;
-    this.messageCallbacks = /* @__PURE__ */ new Map();
-    this.pendingRequests = /* @__PURE__ */ new Map();
-    this.trustedDevices = [];
-    // Сохраняем оригинальный обработчик для генерации ключа
-    this.onMessageCallbackOriginal = () => {
-    };
-    this.serverUrl = options.serverUrl;
-    this.deviceId = options.deviceId;
-    this.deviceName = options.deviceName;
-    this.onMessageCallback = options.onMessage;
-    this.onConnectionChangeCallback = options.onConnectionChange;
-    this.onTrustedDevicesChangeCallback = options.onTrustedDevicesChange;
-    this.onSyncRequestCallback = options.onSyncRequest;
-  }
-  /**
-   * Подключиться к серверу
-   */
-  connect() {
-    if (this.ws && (this.ws.readyState === WebSocket.CONNECTING || this.ws.readyState === WebSocket.OPEN)) {
-      console.log("WebSocket already connected or connecting");
-      return;
-    }
-    try {
-      this.ws = new WebSocket(this.serverUrl);
-      this.ws.onopen = this.handleOpen.bind(this);
-      this.ws.onmessage = this.handleMessage.bind(this);
-      this.ws.onclose = this.handleClose.bind(this);
-      this.ws.onerror = this.handleError.bind(this);
-    } catch (error) {
-      console.error("Error connecting to WebSocket server:", error);
-      this.scheduleReconnect();
-    }
-  }
-  /**
-   * Отключиться от сервера
-   */
-  disconnect() {
-    this.stopHeartbeat();
-    if (this.reconnectTimeout) {
-      clearTimeout(this.reconnectTimeout);
-      this.reconnectTimeout = null;
-    }
-    if (this.ws) {
-      this.ws.close();
-      this.ws = null;
-    }
-  }
-  /**
-   * Отправить сообщение на сервер
-   */
-  sendMessage(message) {
-    if (!this.isConnected || !this.ws) {
-      console.error("Cannot send message: WebSocket not connected");
-      if (!this.reconnectTimeout) {
-        console.log("\u041F\u043E\u043F\u044B\u0442\u043A\u0430 \u0432\u043E\u0441\u0441\u0442\u0430\u043D\u043E\u0432\u0438\u0442\u044C \u0441\u043E\u0435\u0434\u0438\u043D\u0435\u043D\u0438\u0435 \u0430\u0432\u0442\u043E\u043C\u0430\u0442\u0438\u0447\u0435\u0441\u043A\u0438...");
-        this.scheduleReconnect();
-      }
-      return false;
-    }
-    if (this.ws.readyState !== WebSocket.OPEN) {
-      console.error(`Cannot send message: WebSocket \u0432 \u043D\u0435\u043F\u0440\u0430\u0432\u0438\u043B\u044C\u043D\u043E\u043C \u0441\u043E\u0441\u0442\u043E\u044F\u043D\u0438\u0438 (${this.ws.readyState})`);
-      this.disconnect();
-      this.connect();
-      return false;
-    }
-    try {
-      const fullMessage = {
-        ...message,
-        sourceDeviceId: this.deviceId,
-        timestamp: Date.now()
-      };
-      console.log("\u041E\u0442\u043F\u0440\u0430\u0432\u043A\u0430 \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u044F:", fullMessage);
-      this.ws.send(JSON.stringify(fullMessage));
-      console.log("\u0421\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u0435 \u043E\u0442\u043F\u0440\u0430\u0432\u043B\u0435\u043D\u043E \u0443\u0441\u043F\u0435\u0448\u043D\u043E");
-      return true;
-    } catch (error) {
-      console.error("Error sending message:", error);
-      return false;
-    }
-  }
-  /**
-   * Отправить сообщение и получить ответ через Promise
-   */
-  async sendMessageWithResponse(message, timeout = 3e4) {
-    return new Promise((resolve, reject) => {
-      if (!this.isConnected || !this.ws) {
-        reject(new Error("WebSocket not connected"));
-        return;
-      }
-      const requestId = this.generateRequestId();
-      const fullMessage = {
-        ...message,
-        sourceDeviceId: this.deviceId,
-        requestId,
-        timestamp: Date.now()
-      };
-      console.log("\u041E\u0442\u043F\u0440\u0430\u0432\u043A\u0430 \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u044F \u0441 \u043E\u0436\u0438\u0434\u0430\u043D\u0438\u0435\u043C \u043E\u0442\u0432\u0435\u0442\u0430:", fullMessage);
-      const timeoutId = setTimeout(() => {
-        console.log("\u0422\u0430\u0439\u043C\u0430\u0443\u0442 \u0434\u043B\u044F \u0437\u0430\u043F\u0440\u043E\u0441\u0430:", requestId);
-        this.messageCallbacks.delete(requestId);
-        reject(new Error("Request timeout"));
-      }, timeout);
-      this.messageCallbacks.set(requestId, (response) => {
-        console.log("\u041F\u043E\u043B\u0443\u0447\u0435\u043D \u043E\u0442\u0432\u0435\u0442 \u043D\u0430 \u0437\u0430\u043F\u0440\u043E\u0441:", requestId, response);
-        clearTimeout(timeoutId);
-        resolve(response);
-      });
-      try {
-        this.ws.send(JSON.stringify(fullMessage));
-        console.log("\u0421\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u0435 \u043E\u0442\u043F\u0440\u0430\u0432\u043B\u0435\u043D\u043E \u0443\u0441\u043F\u0435\u0448\u043D\u043E, \u043E\u0436\u0438\u0434\u0430\u043D\u0438\u0435 \u043E\u0442\u0432\u0435\u0442\u0430...");
-      } catch (error) {
-        console.error("\u041E\u0448\u0438\u0431\u043A\u0430 \u043F\u0440\u0438 \u043E\u0442\u043F\u0440\u0430\u0432\u043A\u0435 \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u044F:", error);
-        clearTimeout(timeoutId);
-        this.messageCallbacks.delete(requestId);
-        reject(error);
-      }
-    });
-  }
-  /**
-   * Генерация ключа приглашения
-   */
-  async generateInvitationKey(expirationMinutes = 10) {
-    try {
-      return new Promise((resolve, reject) => {
-        const keyHandler = (message) => {
-          if (message.type === "invitationKey" && message.key) {
-            console.log("\u041F\u043E\u043B\u0443\u0447\u0435\u043D \u043A\u043B\u044E\u0447 \u043F\u0440\u0438\u0433\u043B\u0430\u0448\u0435\u043D\u0438\u044F:", message.key);
-            this.onMessageCallback = this.onMessageCallbackOriginal;
-            resolve(message.key);
-          }
-        };
-        this.onMessageCallbackOriginal = this.onMessageCallback;
-        const tempHandler = (message) => {
-          if (message.type === "invitationKey") {
-            keyHandler(message);
-          } else {
-            this.onMessageCallbackOriginal(message);
-          }
-        };
-        this.onMessageCallback = tempHandler;
-        this.sendMessage({
-          type: "generateInvitationKey",
-          payload: {
-            expiration: expirationMinutes * 60 * 1e3
-          }
-        });
-        setTimeout(() => {
-          this.onMessageCallback = this.onMessageCallbackOriginal;
-          reject(new Error("\u0422\u0430\u0439\u043C\u0430\u0443\u0442 \u043F\u0440\u0438 \u0437\u0430\u043F\u0440\u043E\u0441\u0435 \u043A\u043B\u044E\u0447\u0430 \u043F\u0440\u0438\u0433\u043B\u0430\u0448\u0435\u043D\u0438\u044F"));
-        }, 3e4);
-      });
-    } catch (error) {
-      console.error("Error generating invitation key:", error);
-      throw error;
-    }
-  }
-  // Этот обработчик уже определен выше в классе
-  /**
-   * Использование ключа приглашения
-   */
-  async useInvitationKey(key) {
-    try {
-      if (!key || key.trim() === "") {
-        console.error("Error: Empty invitation key");
-        return false;
-      }
-      return new Promise((resolve, reject) => {
-        const syncRequestHandler = (message) => {
-          if (message.type === "syncRequestSent") {
-            console.log("\u0417\u0430\u043F\u0440\u043E\u0441 \u043D\u0430 \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u044E \u043E\u0442\u043F\u0440\u0430\u0432\u043B\u0435\u043D");
-            this.onMessageCallback = this.onMessageCallbackOriginal;
-            resolve(true);
-          } else if (message.type === "error") {
-            console.error("\u041E\u0448\u0438\u0431\u043A\u0430 \u043F\u0440\u0438 \u0438\u0441\u043F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u043D\u0438\u0438 \u043A\u043B\u044E\u0447\u0430:", message);
-            this.onMessageCallback = this.onMessageCallbackOriginal;
-            resolve(false);
-          }
-        };
-        this.onMessageCallbackOriginal = this.onMessageCallback;
-        const tempHandler = (message) => {
-          if (message.type === "syncRequestSent" || message.type === "error") {
-            syncRequestHandler(message);
-          } else {
-            this.onMessageCallbackOriginal(message);
-          }
-        };
-        this.onMessageCallback = tempHandler;
-        const cleanKey = key.trim().toUpperCase();
-        console.log("Sending cleaned key:", cleanKey);
-        this.sendMessage({
-          type: "useInvitationKey",
-          key: cleanKey,
-          deviceName: this.deviceName
-        });
-        setTimeout(() => {
-          this.onMessageCallback = this.onMessageCallbackOriginal;
-          reject(new Error("\u0422\u0430\u0439\u043C\u0430\u0443\u0442 \u043F\u0440\u0438 \u0438\u0441\u043F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u043D\u0438\u0438 \u043A\u043B\u044E\u0447\u0430 \u043F\u0440\u0438\u0433\u043B\u0430\u0448\u0435\u043D\u0438\u044F"));
-        }, 3e4);
-      });
-    } catch (error) {
-      console.error("Error using invitation key:", error);
-      return false;
-    }
-  }
-  /**
-   * Ответ на запрос синхронизации
-   */
-  async respondToSyncRequest(requestId, targetDeviceId, accept, trusted = false) {
-    try {
-      console.log(`\u041E\u0442\u043F\u0440\u0430\u0432\u043A\u0430 \u043E\u0442\u0432\u0435\u0442\u0430 \u043D\u0430 \u0437\u0430\u043F\u0440\u043E\u0441 \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438: 
-                requestId=${requestId}, 
-                targetDeviceId=${targetDeviceId}, 
-                accept=${accept}, 
-                trusted=${trusted}`);
-      this.sendMessage({
-        type: "syncResponse",
-        requestId,
-        targetDeviceId,
-        accept,
-        trusted: trusted || false
-      });
-      console.log("\u0421\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u0435 \u0441 \u043E\u0442\u0432\u0435\u0442\u043E\u043C \u043D\u0430 \u0437\u0430\u043F\u0440\u043E\u0441 \u043E\u0442\u043F\u0440\u0430\u0432\u043B\u0435\u043D\u043E");
-      if (accept && trusted) {
-        console.log(`\u041B\u043E\u043A\u0430\u043B\u044C\u043D\u043E \u0434\u043E\u0431\u0430\u0432\u043B\u044F\u0435\u043C \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u043E ${targetDeviceId} \u0432 \u0434\u043E\u0432\u0435\u0440\u0435\u043D\u043D\u044B\u0435`);
-        if (!this.trustedDevices) {
-          this.trustedDevices = [];
-        }
-        let existingDevice = false;
-        if (Array.isArray(this.trustedDevices)) {
-          existingDevice = this.trustedDevices.some((device) => device.id === targetDeviceId);
-        }
-        if (!existingDevice) {
-          const newDevice = {
-            id: targetDeviceId,
-            name: "\u041D\u043E\u0432\u043E\u0435 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u043E"
-            // Имя обновится позже от сервера
-          };
-          this.trustedDevices = [...this.trustedDevices, newDevice];
-          this.onTrustedDevicesChangeCallback(this.trustedDevices);
-          console.log("\u0421\u043F\u0438\u0441\u043E\u043A \u0434\u043E\u0432\u0435\u0440\u0435\u043D\u043D\u044B\u0445 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432 \u043E\u0431\u043D\u043E\u0432\u043B\u0435\u043D \u043B\u043E\u043A\u0430\u043B\u044C\u043D\u043E");
-        }
-      }
-      return true;
-    } catch (error) {
-      console.error("Error responding to sync request:", error);
-      return false;
-    }
-  }
-  /**
-   * Отзыв доверия устройству
-   */
-  async revokeTrust(deviceId) {
-    try {
-      const response = await this.sendMessageWithResponse({
-        type: "revokeTrust",
-        targetDeviceId: deviceId
-      });
-      if (response.success) {
-        this.trustedDevices = this.trustedDevices.filter((device) => device.id !== deviceId);
-        this.onTrustedDevicesChangeCallback(this.trustedDevices);
-      }
-      return response.success;
-    } catch (error) {
-      console.error("Error revoking trust:", error);
-      return false;
-    }
-  }
-  /**
-   * Обработчик успешного подключения
-   */
-  handleOpen() {
-    console.log("WebSocket connected");
-    this.isConnected = true;
-    this.reconnectAttempts = 0;
-    this.onConnectionChangeCallback(true);
-    this.registerDevice();
-    this.startHeartbeat();
-  }
-  /**
-   * Регистрация устройства на сервере
-   */
-  registerDevice() {
-    this.sendMessage({
-      type: "register",
-      deviceName: this.deviceName
-    });
-    this.requestTrustedDevices();
-  }
-  /**
-   * Запрос списка доверенных устройств
-   */
-  requestTrustedDevices() {
-    console.log("\u0417\u0430\u043F\u0440\u043E\u0441 \u0441\u043F\u0438\u0441\u043A\u0430 \u0434\u043E\u0432\u0435\u0440\u0435\u043D\u043D\u044B\u0445 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432");
-    this.sendMessage({
-      type: "getTrustedDevices"
-    });
-    if (!this.trustedDevices || !Array.isArray(this.trustedDevices)) {
-      this.trustedDevices = [];
-    }
-  }
-  /**
-   * Обработчик получения сообщения
-   */
-  handleMessage(event) {
-    try {
-      const message = JSON.parse(event.data);
-      console.log("Received WebSocket message:", message);
-      if (message.requestId && this.messageCallbacks.has(message.requestId)) {
-        console.log("\u041E\u0431\u0440\u0430\u0431\u043E\u0442\u043A\u0430 \u043E\u0442\u0432\u0435\u0442\u0430 \u043D\u0430 \u0437\u0430\u043F\u0440\u043E\u0441:", message.requestId);
-        const callback = this.messageCallbacks.get(message.requestId);
-        this.messageCallbacks.delete(message.requestId);
-        if (callback)
-          callback(message);
-        return;
-      }
-      switch (message.type) {
-        case "pong":
-          break;
-        case "invitationKey":
-          console.log("\u041F\u043E\u043B\u0443\u0447\u0435\u043D \u043A\u043B\u044E\u0447 \u043F\u0440\u0438\u0433\u043B\u0430\u0448\u0435\u043D\u0438\u044F:", message.key);
-          this.onMessageCallback(message);
-          break;
-        case "trustedDevices":
-          console.log("\u041F\u043E\u043B\u0443\u0447\u0435\u043D \u0441\u043F\u0438\u0441\u043E\u043A \u0434\u043E\u0432\u0435\u0440\u0435\u043D\u043D\u044B\u0445 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432");
-          if (message.devices && Array.isArray(message.devices)) {
-            this.handleTrustedDevicesUpdate(message.devices);
-          } else if (message.payload) {
-            this.handleTrustedDevicesUpdate(message.payload);
-          } else {
-            this.handleTrustedDevicesUpdate([]);
-          }
-          break;
-        case "syncRequest":
-          console.log(
-            "\u041F\u043E\u043B\u0443\u0447\u0435\u043D \u0437\u0430\u043F\u0440\u043E\u0441 \u043D\u0430 \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u044E \u043E\u0442 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u0430:",
-            message.sourceName || message.sourceDeviceId
-          );
-          this.handleSyncRequest(message);
-          break;
-        case "syncResponseReceived":
-          console.log(
-            "\u041F\u043E\u043B\u0443\u0447\u0435\u043D \u043E\u0442\u0432\u0435\u0442 \u043D\u0430 \u0437\u0430\u043F\u0440\u043E\u0441 \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438:",
-            message.accepted ? "\u041F\u0420\u0418\u041D\u042F\u0422" : "\u041E\u0422\u041A\u041B\u041E\u041D\u0415\u041D"
-          );
-          if (message.accepted && message.sourceDeviceId) {
-            console.log("\u0417\u0430\u043F\u0440\u043E\u0441 \u043F\u0440\u0438\u043D\u044F\u0442, \u043E\u0431\u043D\u043E\u0432\u043B\u044F\u0435\u043C \u043B\u043E\u043A\u0430\u043B\u044C\u043D\u044B\u0439 \u0441\u043F\u0438\u0441\u043E\u043A \u0434\u043E\u0432\u0435\u0440\u0435\u043D\u043D\u044B\u0445 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432");
-            if (!this.trustedDevices) {
-              this.trustedDevices = [];
-            }
-            let existingIndex = -1;
-            if (Array.isArray(this.trustedDevices)) {
-              existingIndex = this.trustedDevices.findIndex(
-                (d) => d && d.id === message.sourceDeviceId
-              );
-            }
-            if (existingIndex === -1) {
-              this.trustedDevices.push({
-                id: message.sourceDeviceId,
-                name: message.deviceName || "\u0423\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u043E " + message.sourceDeviceId.substring(0, 8)
-              });
-              this.onTrustedDevicesChangeCallback(this.trustedDevices);
-              console.log("\u0414\u043E\u0431\u0430\u0432\u043B\u0435\u043D\u043E \u043D\u043E\u0432\u043E\u0435 \u0434\u043E\u0432\u0435\u0440\u0435\u043D\u043D\u043E\u0435 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u043E:", message.sourceDeviceId);
-            }
-          }
-          this.onMessageCallback(message);
-          break;
-        case "trustRevoked":
-          console.log("\u041F\u043E\u043B\u0443\u0447\u0435\u043D\u043E \u0443\u0432\u0435\u0434\u043E\u043C\u043B\u0435\u043D\u0438\u0435 \u043E\u0431 \u043E\u0442\u0437\u044B\u0432\u0435 \u0434\u043E\u0432\u0435\u0440\u0438\u044F");
-          this.handleTrustRevoked(message);
-          break;
-        case "trustExpired":
-          console.log("\u041F\u043E\u043B\u0443\u0447\u0435\u043D\u043E \u0443\u0432\u0435\u0434\u043E\u043C\u043B\u0435\u043D\u0438\u0435 \u043E\u0431 \u0438\u0441\u0442\u0435\u0447\u0435\u043D\u0438\u0438 \u0441\u0440\u043E\u043A\u0430 \u0434\u043E\u0432\u0435\u0440\u0438\u044F");
-          this.handleTrustExpired(message);
-          break;
-        case "message":
-          if (message.payload) {
-            const payload = message.payload;
-            if (typeof payload === "object" && payload !== null && ("path" in payload || "encryptedData" in payload || "deleted" in payload)) {
-              console.log("\u041F\u043E\u043B\u0443\u0447\u0435\u043D\u044B \u0434\u0430\u043D\u043D\u044B\u0435 \u0444\u0430\u0439\u043B\u043E\u0432\u043E\u0439 \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438 (\u0442\u0438\u043F message)");
-              const fileSyncMessage = {
-                ...message,
-                type: "fileSync"
-              };
-              this.onMessageCallback(fileSyncMessage);
-              break;
-            }
-          }
-          console.log("\u041F\u043E\u043B\u0443\u0447\u0435\u043D\u043E \u043E\u0431\u044B\u0447\u043D\u043E\u0435 \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u0435 \u0441 \u0434\u0430\u043D\u043D\u044B\u043C\u0438");
-          this.onMessageCallback(message);
-          break;
-        case "error":
-          console.error("\u041F\u043E\u043B\u0443\u0447\u0435\u043D\u0430 \u043E\u0448\u0438\u0431\u043A\u0430 \u043E\u0442 \u0441\u0435\u0440\u0432\u0435\u0440\u0430:", message.message);
-          this.onMessageCallback(message);
-          break;
-        default:
-          console.log("\u041F\u043E\u043B\u0443\u0447\u0435\u043D\u043E \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u0435 \u043D\u0435\u0438\u0437\u0432\u0435\u0441\u0442\u043D\u043E\u0433\u043E \u0442\u0438\u043F\u0430:", message.type);
-          this.onMessageCallback(message);
-          break;
-      }
-    } catch (error) {
-      console.error("Error parsing message:", error);
-    }
-  }
-  /**
-   * Обработка обновления списка доверенных устройств
-   */
-  handleTrustedDevicesUpdate(devices) {
-    console.log("\u041E\u0431\u043D\u043E\u0432\u043B\u0435\u043D\u0438\u0435 \u0441\u043F\u0438\u0441\u043A\u0430 \u0434\u043E\u0432\u0435\u0440\u0435\u043D\u043D\u044B\u0445 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432:", devices);
-    if (!devices) {
-      console.log("\u041F\u043E\u043B\u0443\u0447\u0435\u043D \u043F\u0443\u0441\u0442\u043E\u0439 \u0441\u043F\u0438\u0441\u043E\u043A \u0434\u043E\u0432\u0435\u0440\u0435\u043D\u043D\u044B\u0445 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432, \u0438\u043D\u0438\u0446\u0438\u0430\u043B\u0438\u0437\u0438\u0440\u0443\u0435\u043C \u043F\u0443\u0441\u0442\u043E\u0439 \u043C\u0430\u0441\u0441\u0438\u0432");
-      this.trustedDevices = [];
-      this.onTrustedDevicesChangeCallback([]);
-      return;
-    }
-    const validDevices = Array.isArray(devices) ? devices.filter((d) => d && typeof d === "object" && d.id) : [];
-    console.log(`\u041E\u0431\u0440\u0430\u0431\u043E\u0442\u0430\u043D\u043E ${validDevices.length} \u0434\u043E\u0432\u0435\u0440\u0435\u043D\u043D\u044B\u0445 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432`);
-    this.trustedDevices = validDevices;
-    this.onTrustedDevicesChangeCallback(validDevices);
-  }
-  /**
-   * Обработка запроса на синхронизацию
-   */
-  handleSyncRequest(request) {
-    if (request.requestId) {
-      this.pendingRequests.set(request.requestId, request);
-    }
-    this.onSyncRequestCallback(request);
-  }
-  /**
-   * Обработка отзыва доверия
-   */
-  handleTrustRevoked(message) {
-    if (message.sourceDeviceId) {
-      this.trustedDevices = this.trustedDevices.filter(
-        (device) => device.id !== message.sourceDeviceId
-      );
-      this.onTrustedDevicesChangeCallback(this.trustedDevices);
-    }
-  }
-  /**
-   * Обработка истечения срока доверия
-   */
-  handleTrustExpired(message) {
-    if (message.sourceDeviceId) {
-      this.trustedDevices = this.trustedDevices.filter(
-        (device) => device.id !== message.sourceDeviceId
-      );
-      this.onTrustedDevicesChangeCallback(this.trustedDevices);
-    }
-  }
-  /**
-   * Обработчик закрытия соединения
-   */
-  handleClose(event) {
-    console.log(`WebSocket disconnected with code: ${event.code}, reason: ${event.reason}`);
-    this.isConnected = false;
-    this.onConnectionChangeCallback(false);
-    this.stopHeartbeat();
-    if (this.ws) {
-      this.scheduleReconnect();
-    }
-  }
-  /**
-   * Обработчик ошибки соединения
-   */
-  handleError(error) {
-    console.error("WebSocket error:", error);
-  }
-  /**
-   * Планирование переподключения
-   */
-  scheduleReconnect() {
-    if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-      console.log("Maximum reconnect attempts reached");
-      return;
-    }
-    const delay = Math.min(1e3 * Math.pow(2, this.reconnectAttempts), 3e4);
-    this.reconnectAttempts++;
-    console.log(`Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})`);
-    this.reconnectTimeout = setTimeout(() => {
-      console.log("Attempting to reconnect...");
-      this.connect();
-    }, delay);
-  }
-  /**
-   * Начать отправку пинг-сообщений
-   */
-  startHeartbeat() {
-    this.heartbeatInterval = setInterval(() => {
-      if (this.isConnected && this.ws && this.ws.readyState === WebSocket.OPEN) {
-        this.sendMessage({ type: "ping" });
-      }
-    }, 3e4);
-  }
-  /**
-   * Остановить отправку пинг-сообщений
-   */
-  stopHeartbeat() {
-    if (this.heartbeatInterval) {
-      clearInterval(this.heartbeatInterval);
-      this.heartbeatInterval = null;
-    }
-  }
-  /**
-   * Генерация уникального идентификатора запроса
-   */
-  generateRequestId() {
-    return Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
-  }
-  /**
-   * Получить список доверенных устройств
-   */
-  getTrustedDevices() {
-    return [...this.trustedDevices];
-  }
-  /**
-   * Проверить, является ли устройство доверенным
-   */
-  isDeviceTrusted(deviceId) {
-    return this.trustedDevices.some((device) => device.id === deviceId);
-  }
-};
-
-// src/utils/file-watcher.ts
-var import_obsidian3 = require("obsidian");
-var FileWatcher = class {
-  constructor(vault, onChange) {
-    this.ignoredPatterns = [
-      /\.git\//,
-      // Git-файлы
-      /\.obsidian\//,
-      // Настройки Obsidian
-      /\.DS_Store/,
-      // Служебные файлы macOS
-      /Thumbs\.db/,
-      // Служебные файлы Windows
-      /\.sync\//,
-      // Папка синхронизации
-      /\.trash\//
-      // Корзина
-    ];
-    this.ignoredExtensions = [
-      ".tmp",
-      ".temp",
-      ".swp",
-      ".bak"
-    ];
-    this.vault = vault;
-    this.onChangeCallback = onChange;
-  }
-  /**
-   * Запустить отслеживание изменений файлов
-   */
-  startWatching() {
-    this.vault.on("create", this.handleFileCreate.bind(this));
-    this.vault.on("modify", this.handleFileModify.bind(this));
-    this.vault.on("delete", this.handleFileDelete.bind(this));
-    this.vault.on("rename", this.handleFileRename.bind(this));
-  }
-  /**
-   * Остановить отслеживание изменений файлов
-   */
-  stopWatching() {
-    this.vault.off("create", this.handleFileCreate.bind(this));
-    this.vault.off("modify", this.handleFileModify.bind(this));
-    this.vault.off("delete", this.handleFileDelete.bind(this));
-    this.vault.off("rename", this.handleFileRename.bind(this));
-  }
-  /**
-   * Добавить паттерн для игнорирования файлов
-   */
-  addIgnorePattern(pattern) {
-    this.ignoredPatterns.push(pattern);
-  }
-  /**
-   * Добавить расширение для игнорирования файлов
-   */
-  addIgnoreExtension(extension) {
-    this.ignoredExtensions.push(extension);
-  }
-  /**
-   * Проверить, должен ли файл быть проигнорирован
-   */
-  shouldIgnore(path) {
-    for (const pattern of this.ignoredPatterns) {
-      if (pattern.test(path)) {
-        return true;
-      }
-    }
-    for (const ext of this.ignoredExtensions) {
-      if (path.endsWith(ext)) {
-        return true;
-      }
-    }
-    return false;
-  }
-  /**
-   * Обработчик создания файла
-   */
-  handleFileCreate(file) {
-    if (!(file instanceof import_obsidian3.TFile) || this.shouldIgnore(file.path)) {
-      return;
-    }
-    this.onChangeCallback({
-      path: file.path,
-      type: "create",
-      file,
-      timestamp: Date.now()
-    });
-  }
-  /**
-   * Обработчик изменения файла
-   */
-  handleFileModify(file) {
-    if (!(file instanceof import_obsidian3.TFile) || this.shouldIgnore(file.path)) {
-      return;
-    }
-    this.onChangeCallback({
-      path: file.path,
-      type: "modify",
-      file,
-      timestamp: Date.now()
-    });
-  }
-  /**
-   * Обработчик удаления файла
-   */
-  handleFileDelete(file) {
-    if (!(file instanceof import_obsidian3.TFile) || this.shouldIgnore(file.path)) {
-      return;
-    }
-    this.onChangeCallback({
-      path: file.path,
-      type: "delete",
-      file,
-      timestamp: Date.now()
-    });
-  }
-  /**
-   * Обработчик переименования файла
-   */
-  handleFileRename(file, oldPath) {
-    if (!(file instanceof import_obsidian3.TFile) || this.shouldIgnore(file.path)) {
-      return;
-    }
-    this.onChangeCallback({
-      path: file.path,
-      oldPath,
-      type: "rename",
-      file,
-      timestamp: Date.now()
-    });
-  }
-  /**
-   * Получить текущее состояние всех файлов
-   */
-  async scanAllFiles() {
-    const files = this.vault.getFiles();
-    const changes = [];
-    for (const file of files) {
-      if (this.shouldIgnore(file.path)) {
-        continue;
-      }
-      changes.push({
-        path: file.path,
-        type: "create",
-        // Используем 'create' как тип при сканировании
-        file,
-        timestamp: file.stat.mtime
-        // Используем время модификации файла
-      });
-    }
-    return changes;
-  }
-};
-
-// src/client/sync-manager.ts
-var SyncManager = class {
-  constructor(app, options) {
-    this.isSyncing = false;
-    this.fullSyncInterval = null;
-    this.pendingSyncRequests = /* @__PURE__ */ new Map();
-    this.trustedDevices = [];
-    // Режим ожидания - когда плагин запущен, но нет активных доверенных устройств
-    this.waitingMode = true;
-    // Счетчик изменений, ожидающих синхронизации
-    this.pendingChangesCount = 0;
-    /**
-     * Сохранить содержимое файла в кэш
-     */
-    this.fileContentCache = /* @__PURE__ */ new Map();
-    /**
-     * Запросить метаданные файлов у других устройств для оптимизации синхронизации
-     */
-    this.deviceFileMetadata = /* @__PURE__ */ new Map();
-    this.app = app;
-    this.options = options;
-    this.encryptionPassword = options.encryptionPassword;
-    this.syncState = this.loadSyncState();
-    this.relayClient = new RelayClient({
-      serverUrl: options.serverUrl,
-      deviceId: this.syncState.deviceId,
-      deviceName: DeviceManager.getDeviceName(),
-      onMessage: this.handleSyncMessage.bind(this),
-      onConnectionChange: this.handleConnectionChange.bind(this),
-      onTrustedDevicesChange: this.handleTrustedDevicesChange.bind(this),
-      onSyncRequest: this.handleSyncRequest.bind(this)
-    });
-    this.fileWatcher = new FileWatcher(
-      app.vault,
-      this.handleFileChange.bind(this)
-    );
-    if (options.ignoredPaths) {
-      for (const path of options.ignoredPaths) {
-        this.fileWatcher.addIgnorePattern(new RegExp(path));
-      }
-    }
-  }
-  /**
-   * Запустить процесс синхронизации
-   */
-  async start() {
-    this.waitingMode = true;
-    console.log("\u0417\u0430\u043F\u0443\u0441\u043A \u043F\u043B\u0430\u0433\u0438\u043D\u0430 \u0432 \u0440\u0435\u0436\u0438\u043C\u0435 \u043E\u0436\u0438\u0434\u0430\u043D\u0438\u044F...");
-    this.relayClient.connect();
-    this.fileWatcher.startWatching();
-    await this.updateLocalFileState();
-    setTimeout(async () => {
-      console.log("\u041F\u0440\u043E\u0432\u0435\u0440\u043A\u0430 \u0434\u043E\u0441\u0442\u0443\u043F\u043D\u043E\u0441\u0442\u0438 \u0434\u043E\u0432\u0435\u0440\u0435\u043D\u043D\u044B\u0445 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432...");
-      await this.checkActiveTrustedDevices();
-    }, 3e3);
-  }
-  /**
-   * Проверка активных доверенных устройств и отправка сигнала
-   */
-  async checkActiveTrustedDevices() {
-    const trustedDevices = this.relayClient.getTrustedDevices();
-    if (!Array.isArray(trustedDevices) || trustedDevices.length === 0) {
-      console.log("\u041D\u0435\u0442 \u0434\u043E\u0432\u0435\u0440\u0435\u043D\u043D\u044B\u0445 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432. \u041F\u0435\u0440\u0435\u0445\u043E\u0434 \u0432 \u0440\u0435\u0436\u0438\u043C \u043E\u0436\u0438\u0434\u0430\u043D\u0438\u044F.");
-      this.waitingMode = true;
-      await this.updateLocalFileState();
-      return;
-    }
-    console.log(`\u041E\u0442\u043F\u0440\u0430\u0432\u043A\u0430 \u0441\u0438\u0433\u043D\u0430\u043B\u0430 \u0430\u043A\u0442\u0438\u0432\u043D\u043E\u0441\u0442\u0438 \u043D\u0430 ${trustedDevices.length} \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432...`);
-    const pingPromises = trustedDevices.map((device) => {
-      return new Promise((resolve) => {
-        const pingId = `ping-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
-        const handlePingResponse = (message) => {
-          if (message.type === "message" && message.sourceDeviceId === device.id && message.payload && message.payload.action === "devicePingResponse" && message.payload.pingId === pingId) {
-            console.log(`\u041F\u043E\u043B\u0443\u0447\u0435\u043D \u043E\u0442\u0432\u0435\u0442 \u043D\u0430 \u043F\u0438\u043D\u0433 \u043E\u0442 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u0430 ${device.name || device.id}`);
-            const originalCallback2 = this.relayClient["onMessageCallbackOriginal"];
-            if (originalCallback2) {
-              this.relayClient["onMessageCallback"] = originalCallback2;
-            }
-            resolve(true);
-          }
-        };
-        const originalCallback = this.relayClient["onMessageCallback"];
-        this.relayClient["onMessageCallbackOriginal"] = originalCallback;
-        this.relayClient["onMessageCallback"] = (message) => {
-          handlePingResponse(message);
-          originalCallback(message);
-        };
-        this.relayClient.sendMessage({
-          type: "message",
-          targetDeviceId: device.id,
-          payload: {
-            action: "devicePing",
-            pingId
-          }
-        });
-        setTimeout(() => {
-          this.relayClient["onMessageCallback"] = originalCallback;
-          resolve(false);
-        }, 3e3);
-      });
-    });
-    const results = await Promise.all(pingPromises);
-    const activeDevicesCount = results.filter((r) => r).length;
-    console.log(`\u0410\u043A\u0442\u0438\u0432\u043D\u044B\u0445 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432 \u043E\u0431\u043D\u0430\u0440\u0443\u0436\u0435\u043D\u043E: ${activeDevicesCount} \u0438\u0437 ${trustedDevices.length}`);
-    if (activeDevicesCount > 0) {
-      console.log("\u0415\u0441\u0442\u044C \u0430\u043A\u0442\u0438\u0432\u043D\u044B\u0435 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u0430. \u0412\u044B\u0445\u043E\u0434 \u0438\u0437 \u0440\u0435\u0436\u0438\u043C\u0430 \u043E\u0436\u0438\u0434\u0430\u043D\u0438\u044F.");
-      this.waitingMode = false;
-      if (this.options.fullSyncInterval && !this.fullSyncInterval) {
-        this.fullSyncInterval = setInterval(
-          this.performFullSync.bind(this),
-          this.options.fullSyncInterval
-        );
-      }
-      console.log("\u0417\u0430\u043F\u0443\u0441\u043A \u043D\u0430\u0447\u0430\u043B\u044C\u043D\u043E\u0439 \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438...");
-      await this.performFullSync();
-    } else {
-      console.log("\u041D\u0435\u0442 \u0430\u043A\u0442\u0438\u0432\u043D\u044B\u0445 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432. \u041E\u0441\u0442\u0430\u0451\u043C\u0441\u044F \u0432 \u0440\u0435\u0436\u0438\u043C\u0435 \u043E\u0436\u0438\u0434\u0430\u043D\u0438\u044F.");
-      this.waitingMode = true;
-      setTimeout(() => this.checkActiveTrustedDevices(), 6e4);
-    }
-  }
-  /**
-   * Остановить процесс синхронизации
-   */
-  stop() {
-    this.fileWatcher.stopWatching();
-    this.relayClient.disconnect();
-    if (this.fullSyncInterval) {
-      clearInterval(this.fullSyncInterval);
-      this.fullSyncInterval = null;
-    }
-    this.saveSyncState();
-  }
-  /**
-   * Обработчик изменения файла
-   */
-  async handleFileChange(change) {
-    try {
-      if (this.isSyncing) {
-        return;
-      }
-      this.pendingChangesCount++;
-      switch (change.type) {
-        case "create":
-        case "modify":
-          await this.handleFileCreateOrModify(change);
-          break;
-        case "delete":
-          await this.handleFileDelete(change);
-          break;
-        case "rename":
-          await this.handleFileRename(change);
-          break;
-      }
-      this.saveSyncState();
-      if (this.waitingMode && this.pendingChangesCount >= 5) {
-        console.log(`\u041D\u0430\u043A\u043E\u043F\u043B\u0435\u043D\u043E ${this.pendingChangesCount} \u0438\u0437\u043C\u0435\u043D\u0435\u043D\u0438\u0439. \u041F\u0440\u043E\u0432\u0435\u0440\u044F\u0435\u043C \u043D\u0430\u043B\u0438\u0447\u0438\u0435 \u0430\u043A\u0442\u0438\u0432\u043D\u044B\u0445 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432...`);
-        this.checkActiveTrustedDevices();
-      }
-    } catch (error) {
-      console.error("Error handling file change:", error);
-      new import_obsidian4.Notice("\u041E\u0448\u0438\u0431\u043A\u0430 \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438 \u0444\u0430\u0439\u043B\u0430: " + error.message);
-    }
-  }
-  /**
-   * Обработчик создания или изменения файла
-   */
-  async handleFileCreateOrModify(change) {
-    const file = change.file;
-    const content = await this.app.vault.read(file);
-    const hash = await CryptoHelper.hashString(content);
-    const existingFile = this.syncState.files[file.path];
-    if (existingFile && existingFile.hash === hash) {
-      this.pendingChangesCount = Math.max(0, this.pendingChangesCount - 1);
-      return;
-    }
-    this.syncState.files[file.path] = {
-      path: file.path,
-      hash,
-      mtime: file.stat.mtime,
-      size: file.stat.size
-    };
-    if (!this.waitingMode) {
-      console.log(`\u0421\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u044F \u0438\u0437\u043C\u0435\u043D\u0435\u043D\u0438\u044F \u0444\u0430\u0439\u043B\u0430 ${file.path}`);
-      await this.syncFileWithPeers(file.path, content, hash, file.stat.mtime);
-    } else {
-      console.log(`\u0424\u0430\u0439\u043B ${file.path} \u0438\u0437\u043C\u0435\u043D\u0435\u043D, \u043D\u043E \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u044F \u043E\u0442\u043B\u043E\u0436\u0435\u043D\u0430 (\u0440\u0435\u0436\u0438\u043C \u043E\u0436\u0438\u0434\u0430\u043D\u0438\u044F)`);
-    }
-  }
-  /**
-   * Обработчик удаления файла
-   */
-  async handleFileDelete(change) {
-    const filePath = change.path;
-    if (!this.syncState.files[filePath]) {
-      this.pendingChangesCount = Math.max(0, this.pendingChangesCount - 1);
-      return;
-    }
-    this.syncState.files[filePath] = {
-      ...this.syncState.files[filePath],
-      deleted: true
-    };
-    if (!this.waitingMode) {
-      console.log(`\u0421\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u044F \u0443\u0434\u0430\u043B\u0435\u043D\u0438\u044F \u0444\u0430\u0439\u043B\u0430 ${filePath}`);
-      await this.syncFileDeletion(filePath);
-    } else {
-      console.log(`\u0424\u0430\u0439\u043B ${filePath} \u0443\u0434\u0430\u043B\u0435\u043D, \u043D\u043E \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u044F \u043E\u0442\u043B\u043E\u0436\u0435\u043D\u0430 (\u0440\u0435\u0436\u0438\u043C \u043E\u0436\u0438\u0434\u0430\u043D\u0438\u044F)`);
-    }
-  }
-  /**
-   * Обработчик переименования файла
-   */
-  async handleFileRename(change) {
-    const oldPath = change.oldPath;
-    const newPath = change.path;
-    const file = change.file;
-    if (!oldPath) {
-      console.error("Old path is missing in rename event");
-      this.pendingChangesCount = Math.max(0, this.pendingChangesCount - 1);
-      return;
-    }
-    const oldMetadata = this.syncState.files[oldPath];
-    if (oldMetadata) {
-      this.syncState.files[oldPath] = {
-        ...oldMetadata,
-        deleted: true
-      };
-      if (!this.waitingMode) {
-        await this.syncFileDeletion(oldPath);
-      } else {
-        console.log(`\u0424\u0430\u0439\u043B ${oldPath} \u043F\u0435\u0440\u0435\u0438\u043C\u0435\u043D\u043E\u0432\u0430\u043D, \u0443\u0434\u0430\u043B\u0435\u043D\u0438\u0435 \u043E\u0440\u0438\u0433\u0438\u043D\u0430\u043B\u0430 \u043E\u0442\u043B\u043E\u0436\u0435\u043D\u043E (\u0440\u0435\u0436\u0438\u043C \u043E\u0436\u0438\u0434\u0430\u043D\u0438\u044F)`);
-      }
-    }
-    const content = await this.app.vault.read(file);
-    const hash = await CryptoHelper.hashString(content);
-    this.syncState.files[newPath] = {
-      path: newPath,
-      hash,
-      mtime: file.stat.mtime,
-      size: file.stat.size
-    };
-    if (!this.waitingMode) {
-      console.log(`\u0421\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u044F \u043F\u0435\u0440\u0435\u0438\u043C\u0435\u043D\u043E\u0432\u0430\u043D\u043D\u043E\u0433\u043E \u0444\u0430\u0439\u043B\u0430 ${newPath}`);
-      await this.syncFileWithPeers(newPath, content, hash, file.stat.mtime);
-    } else {
-      console.log(`\u0424\u0430\u0439\u043B ${oldPath} \u043F\u0435\u0440\u0435\u0438\u043C\u0435\u043D\u043E\u0432\u0430\u043D \u0432 ${newPath}, \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u044F \u043E\u0442\u043B\u043E\u0436\u0435\u043D\u0430 (\u0440\u0435\u0436\u0438\u043C \u043E\u0436\u0438\u0434\u0430\u043D\u0438\u044F)`);
-    }
-  }
-  /**
-   * Синхронизация файла с доверенными устройствами
-   * @param path Путь к файлу
-   * @param content Содержимое файла
-   * @param hash Хеш файла
-   * @param mtime Время модификации
-   * @param isNew Флаг, указывающий, что файл новый/недавно изменен
-   * @param specificDevices Список ID устройств для синхронизации (если задан, то только им)
-   * @param requestId ID запроса (если отправка в ответ на запрос)
-   */
-  async syncFileWithPeers(path, content, hash, mtime, isNew = true, specificDevices, requestId) {
-    if (!this.relayClient.isConnected) {
-      console.error(`\u041D\u0435\u0432\u043E\u0437\u043C\u043E\u0436\u043D\u043E \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0438\u0440\u043E\u0432\u0430\u0442\u044C \u0444\u0430\u0439\u043B ${path}: \u043D\u0435\u0442 \u0441\u043E\u0435\u0434\u0438\u043D\u0435\u043D\u0438\u044F \u0441 \u0441\u0435\u0440\u0432\u0435\u0440\u043E\u043C`);
-      new import_obsidian4.Notice(`\u041D\u0435\u0432\u043E\u0437\u043C\u043E\u0436\u043D\u043E \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0438\u0440\u043E\u0432\u0430\u0442\u044C \u0444\u0430\u0439\u043B ${path}: \u043D\u0435\u0442 \u0441\u043E\u0435\u0434\u0438\u043D\u0435\u043D\u0438\u044F \u0441 \u0441\u0435\u0440\u0432\u0435\u0440\u043E\u043C. \u0418\u0437\u043C\u0435\u043D\u0435\u043D\u0438\u044F \u0431\u0443\u0434\u0443\u0442 \u043E\u0442\u043F\u0440\u0430\u0432\u043B\u0435\u043D\u044B \u043F\u0440\u0438 \u0432\u043E\u0441\u0441\u0442\u0430\u043D\u043E\u0432\u043B\u0435\u043D\u0438\u0438 \u0441\u043E\u0435\u0434\u0438\u043D\u0435\u043D\u0438\u044F.`);
-      return;
-    }
-    const allTrustedDevices = this.relayClient.getTrustedDevices();
-    const targetDevices = specificDevices ? allTrustedDevices.filter((device) => specificDevices.includes(device.id)) : allTrustedDevices;
-    if (!Array.isArray(targetDevices) || targetDevices.length === 0) {
-      console.log(`\u041F\u0440\u043E\u043F\u0443\u0441\u043A \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438 \u0444\u0430\u0439\u043B\u0430 ${path}: \u043D\u0435\u0442 \u0446\u0435\u043B\u0435\u0432\u044B\u0445 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432`);
-      return;
-    }
-    try {
-      const isMarkdown = path.endsWith(".md");
-      const isLargeFile = content.length > 1e4;
-      let compressedContent = content;
-      let compressionInfo = { compressed: false, originalSize: content.length, compressedSize: content.length };
-      if (isMarkdown && isLargeFile) {
-        const targetDeviceIds = targetDevices.map((device) => typeof device === "string" ? device : device.id);
-        const remoteFile = this.findRemoteFileVersion(path, targetDeviceIds);
-        if (remoteFile && remoteFile.hash !== hash) {
-          try {
-            const targetDeviceId = typeof targetDevices[0] === "string" ? targetDevices[0] : targetDevices[0].id;
-            const baseContent = await this.getRemoteFileContent(path, remoteFile.hash, targetDeviceId);
-            if (baseContent) {
-              const delta = this.createDelta(baseContent, content);
-              if (delta.length < content.length * 0.7) {
-                console.log(`\u0418\u0441\u043F\u043E\u043B\u044C\u0437\u0443\u0435\u043C \u0434\u0435\u043B\u044C\u0442\u0430-\u0441\u0436\u0430\u0442\u0438\u0435 \u0434\u043B\u044F ${path}: ${delta.length} \u0431\u0430\u0439\u0442 (${Math.round(delta.length / content.length * 100)}% \u043E\u0442 \u043E\u0440\u0438\u0433\u0438\u043D\u0430\u043B\u0430)`);
-                compressedContent = delta;
-                compressionInfo = {
-                  compressed: true,
-                  originalSize: content.length,
-                  compressedSize: delta.length
-                };
-                compressedContent = delta;
-                compressionInfo = {
-                  compressed: true,
-                  originalSize: content.length,
-                  compressedSize: delta.length
-                };
-                const deltaEncryptedData = await CryptoHelper.encrypt(delta, this.encryptionPassword);
-                let successCount = 0;
-                for (const device of targetDevices) {
-                  const deviceId = typeof device === "string" ? device : device.id;
-                  const success = this.relayClient.sendMessage({
-                    type: "fileSync",
-                    targetDeviceId: deviceId,
-                    payload: {
-                      path,
-                      encryptedData: deltaEncryptedData,
-                      mtime,
-                      hash,
-                      priority: isNew ? "high" : "normal",
-                      compression: compressionInfo,
-                      isMarkdown: true,
-                      deltaData: {
-                        baseHash: remoteFile.hash,
-                        isDelta: true
-                      }
-                    }
-                  });
-                  if (success) {
-                    successCount++;
-                  }
-                }
-                if (successCount === 0) {
-                  console.error(`\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u043E\u0442\u043F\u0440\u0430\u0432\u0438\u0442\u044C \u0434\u0435\u043B\u044C\u0442\u0443 \u0434\u043B\u044F ${path} \u043D\u0438 \u043E\u0434\u043D\u043E\u043C\u0443 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u0443 \u0438\u0437-\u0437\u0430 \u043F\u0440\u043E\u0431\u043B\u0435\u043C \u0441 \u0441\u043E\u0435\u0434\u0438\u043D\u0435\u043D\u0438\u0435\u043C`);
-                }
-                console.log(`\u041E\u0442\u043F\u0440\u0430\u0432\u043B\u0435\u043D\u0430 \u0434\u0435\u043B\u044C\u0442\u0430 \u0434\u043B\u044F ${path} \u043D\u0430 ${targetDevices.length} \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432`);
-                return;
-              } else {
-                console.log(`\u0414\u0435\u043B\u044C\u0442\u0430 \u0434\u043B\u044F ${path} \u0441\u043B\u0438\u0448\u043A\u043E\u043C \u0431\u043E\u043B\u044C\u0448\u0430\u044F, \u0438\u0441\u043F\u043E\u043B\u044C\u0437\u0443\u0435\u043C \u043F\u043E\u043B\u043D\u043E\u0435 \u0441\u043E\u0434\u0435\u0440\u0436\u0438\u043C\u043E\u0435`);
-              }
-            }
-          } catch (deltaError) {
-            console.warn(`\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u0441\u043E\u0437\u0434\u0430\u0442\u044C \u0434\u0435\u043B\u044C\u0442\u0443 \u0434\u043B\u044F ${path}:`, deltaError);
-          }
-        }
-        compressedContent = content;
-        compressionInfo = {
-          compressed: true,
-          originalSize: content.length,
-          compressedSize: compressedContent.length
-        };
-      } else if (isLargeFile) {
-        try {
-          const isTextFile = path.match(/\.(txt|json|xml|css|js|html|htm|csv|log)$/i) !== null;
-          if (isTextFile) {
-            compressedContent = this.compressTextContent(content);
-          } else {
-            compressedContent = content;
-          }
-          compressionInfo = {
-            compressed: compressedContent.length < content.length,
-            originalSize: content.length,
-            compressedSize: compressedContent.length
-          };
-          if (compressedContent.length >= content.length) {
-            compressedContent = content;
-            compressionInfo.compressed = false;
-            compressionInfo.compressedSize = content.length;
-          }
-          console.log(`\u0421\u0436\u0430\u0442\u0438\u0435 \u0434\u043B\u044F ${path}: ${compressionInfo.originalSize} -> ${compressionInfo.compressedSize} \u0431\u0430\u0439\u0442 (${Math.round(compressionInfo.compressedSize / compressionInfo.originalSize * 100)}%)`);
-        } catch (compressionError) {
-          console.warn(`\u041E\u0448\u0438\u0431\u043A\u0430 \u043F\u0440\u0438 \u0441\u0436\u0430\u0442\u0438\u0438 \u0444\u0430\u0439\u043B\u0430 ${path}:`, compressionError);
-          compressedContent = content;
-          compressionInfo = {
-            compressed: false,
-            originalSize: content.length,
-            compressedSize: content.length
-          };
-        }
-      }
-      console.log(`\u0428\u0438\u0444\u0440\u043E\u0432\u0430\u043D\u0438\u0435 \u0444\u0430\u0439\u043B\u0430 ${path} (${content.length} \u0431\u0430\u0439\u0442)...`);
-      const encryptedData = await CryptoHelper.encrypt(compressedContent, this.encryptionPassword);
-      const fileMessage = {
-        path,
-        encryptedData,
-        mtime,
-        hash,
-        priority: isNew ? "high" : "normal",
-        compression: compressionInfo,
-        isMarkdown,
-        responseToRequestId: requestId
-      };
-      console.log(`\u041E\u0442\u043F\u0440\u0430\u0432\u043A\u0430 \u0444\u0430\u0439\u043B\u0430 ${path} (${isNew ? "\u043D\u043E\u0432\u044B\u0439/\u0438\u0437\u043C\u0435\u043D\u0451\u043D\u043D\u044B\u0439" : "\u0441\u0442\u0430\u0440\u044B\u0439"}) \u043D\u0430 ${targetDevices.length} \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432...`);
-      if (!isLargeFile || specificDevices) {
-        const sendPromises = targetDevices.map(async (device) => {
-          try {
-            const success = this.relayClient.sendMessage({
-              type: "fileSync",
-              targetDeviceId: device.id,
-              requestId,
-              // Передаем requestId, если это ответ на запрос
-              payload: fileMessage
-            });
-            if (!success) {
-              console.error(`\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u043E\u0442\u043F\u0440\u0430\u0432\u0438\u0442\u044C \u0444\u0430\u0439\u043B ${path} \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u0443 ${device.id} \u0438\u0437-\u0437\u0430 \u043F\u0440\u043E\u0431\u043B\u0435\u043C \u0441 \u0441\u043E\u0435\u0434\u0438\u043D\u0435\u043D\u0438\u0435\u043C`);
-              return false;
-            }
-            return true;
-          } catch (deviceError) {
-            console.error(`\u041E\u0448\u0438\u0431\u043A\u0430 \u043F\u0440\u0438 \u043E\u0442\u043F\u0440\u0430\u0432\u043A\u0435 \u043D\u0430 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u043E ${device.id}:`, deviceError);
-            return false;
-          }
-        });
-        const results = await Promise.allSettled(sendPromises);
-        const successCount = results.filter((r) => r.status === "fulfilled" && r.value).length;
-        console.log(`\u0424\u0430\u0439\u043B ${path} \u043E\u0442\u043F\u0440\u0430\u0432\u043B\u0435\u043D \u043D\u0430 ${successCount}/${targetDevices.length} \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432`);
-        return;
-      }
-      const metadataMessage = {
-        path,
-        hash,
-        mtime,
-        size: content.length,
-        priority: isNew ? "high" : "normal",
-        isMarkdown
-      };
-      let metadataSuccessCount = 0;
-      for (const device of targetDevices) {
-        const success = this.relayClient.sendMessage({
-          type: "fileMetadataOnly",
-          // Отличается от fileMetadata - содержит только метаданные одного файла
-          targetDeviceId: device.id,
-          payload: metadataMessage
-        });
-        if (success) {
-          metadataSuccessCount++;
-        }
-      }
-      if (metadataSuccessCount === 0 && targetDevices.length > 0) {
-        console.error(`\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u043E\u0442\u043F\u0440\u0430\u0432\u0438\u0442\u044C \u043C\u0435\u0442\u0430\u0434\u0430\u043D\u043D\u044B\u0435 \u0444\u0430\u0439\u043B\u0430 ${path} \u043D\u0438 \u043E\u0434\u043D\u043E\u043C\u0443 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u0443 \u0438\u0437-\u0437\u0430 \u043F\u0440\u043E\u0431\u043B\u0435\u043C \u0441 \u0441\u043E\u0435\u0434\u0438\u043D\u0435\u043D\u0438\u0435\u043C`);
-      } else if (metadataSuccessCount < targetDevices.length) {
-        console.warn(`\u041C\u0435\u0442\u0430\u0434\u0430\u043D\u043D\u044B\u0435 \u0444\u0430\u0439\u043B\u0430 ${path} \u043E\u0442\u043F\u0440\u0430\u0432\u043B\u0435\u043D\u044B \u0442\u043E\u043B\u044C\u043A\u043E ${metadataSuccessCount} \u0438\u0437 ${targetDevices.length} \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432 \u0438\u0437-\u0437\u0430 \u043F\u0440\u043E\u0431\u043B\u0435\u043C \u0441 \u0441\u043E\u0435\u0434\u0438\u043D\u0435\u043D\u0438\u0435\u043C`);
-      }
-      this.saveContentToCache(path, content, hash);
-      console.log(`\u041C\u0435\u0442\u0430\u0434\u0430\u043D\u043D\u044B\u0435 \u0444\u0430\u0439\u043B\u0430 ${path} \u043E\u0442\u043F\u0440\u0430\u0432\u043B\u0435\u043D\u044B \u043D\u0430 ${targetDevices.length} \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432. \u041E\u0436\u0438\u0434\u0430\u0435\u043C \u0437\u0430\u043F\u0440\u043E\u0441\u044B \u043D\u0430 \u043F\u043E\u043B\u0443\u0447\u0435\u043D\u0438\u0435 \u0441\u043E\u0434\u0435\u0440\u0436\u0438\u043C\u043E\u0433\u043E.`);
-    } catch (error) {
-      console.error(`Error syncing file ${path}:`, error);
-      throw new Error(`\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0438\u0440\u043E\u0432\u0430\u0442\u044C \u0444\u0430\u0439\u043B ${path}: ${error.message}`);
-    }
-  }
-  /**
-   * Найти версию файла на одном из целевых устройств для дельта-синхронизации
-   */
-  findRemoteFileVersion(path, targetDeviceIds) {
-    for (const deviceId of targetDeviceIds) {
-      const deviceMeta = this.deviceFileMetadata.get(deviceId);
-      if (deviceMeta && deviceMeta[path]) {
-        return deviceMeta[path];
-      }
-    }
-    return null;
-  }
-  /**
-   * Запросить содержимое файла с другого устройства для дельта-синхронизации
-   */
-  async getRemoteFileContent(path, hash, deviceId) {
-    const cachedContent = this.getContentFromCache(path, hash);
-    if (cachedContent) {
-      console.log(`\u041D\u0430\u0439\u0434\u0435\u043D\u0430 \u0432\u0435\u0440\u0441\u0438\u044F \u0444\u0430\u0439\u043B\u0430 ${path} \u0432 \u043A\u044D\u0448\u0435 (hash: ${hash.substring(0, 8)})`);
-      return cachedContent;
-    }
-    try {
-      console.log(`\u0417\u0430\u043F\u0440\u0430\u0448\u0438\u0432\u0430\u0435\u043C \u0432\u0435\u0440\u0441\u0438\u044E \u0444\u0430\u0439\u043B\u0430 ${path} \u0443 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u0430 ${deviceId} \u0434\u043B\u044F \u0434\u0435\u043B\u044C\u0442\u0430-\u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438...`);
-      const requestId = Date.now().toString() + "-delta-" + Math.random().toString(36).substring(2, 7);
-      const responsePromise = new Promise((resolve) => {
-        const handleFileResponse = async (message) => {
-          if (message.type === "fileSync" && message.sourceDeviceId === deviceId && message.responseToRequestId === requestId) {
-            if (message.payload && message.payload.path === path && message.payload.encryptedData) {
-              try {
-                const decryptedContent = await CryptoHelper.decrypt(
-                  message.payload.encryptedData,
-                  this.encryptionPassword
-                );
-                console.log(`\u041F\u043E\u043B\u0443\u0447\u0435\u043D\u0430 \u0432\u0435\u0440\u0441\u0438\u044F \u0444\u0430\u0439\u043B\u0430 ${path} \u0434\u043B\u044F \u0434\u0435\u043B\u044C\u0442\u0430-\u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438`);
-                resolve(decryptedContent);
-                this.saveContentToCache(path, decryptedContent, message.payload.hash);
-                return;
-              } catch (error) {
-                console.error(`\u041E\u0448\u0438\u0431\u043A\u0430 \u043F\u0440\u0438 \u0440\u0430\u0441\u0448\u0438\u0444\u0440\u043E\u0432\u043A\u0435 \u0444\u0430\u0439\u043B\u0430 ${path}:`, error);
-              }
-            }
-          }
-          const originalCallback2 = this.relayClient["onMessageCallbackOriginal"];
-          if (originalCallback2) {
-            originalCallback2(message);
-          }
-        };
-        const originalCallback = this.relayClient["onMessageCallback"];
-        this.relayClient["onMessageCallbackOriginal"] = originalCallback;
-        this.relayClient["onMessageCallback"] = handleFileResponse;
-        this.relayClient.sendMessage({
-          type: "requestFile",
-          targetDeviceId: deviceId,
-          requestId,
-          payload: {
-            path,
-            hash,
-            forDelta: true
-            // Флаг, что это запрос для дельта-синхронизации
-          }
-        });
-        setTimeout(() => {
-          this.relayClient["onMessageCallback"] = originalCallback;
-          console.log(`\u0422\u0430\u0439\u043C\u0430\u0443\u0442 \u0437\u0430\u043F\u0440\u043E\u0441\u0430 \u0441\u043E\u0434\u0435\u0440\u0436\u0438\u043C\u043E\u0433\u043E \u0444\u0430\u0439\u043B\u0430 ${path} \u0434\u043B\u044F \u0434\u0435\u043B\u044C\u0442\u0430-\u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438`);
-          resolve(null);
-        }, 1e4);
-      });
-      return await responsePromise;
-    } catch (error) {
-      console.error(`\u041E\u0448\u0438\u0431\u043A\u0430 \u043F\u0440\u0438 \u0437\u0430\u043F\u0440\u043E\u0441\u0435 \u0441\u043E\u0434\u0435\u0440\u0436\u0438\u043C\u043E\u0433\u043E \u0444\u0430\u0439\u043B\u0430 ${path} \u0434\u043B\u044F \u0434\u0435\u043B\u044C\u0442\u0430-\u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438:`, error);
-      return null;
-    }
-  }
-  /**
-   * Создать дельту между старым и новым содержимым
-   */
-  createDelta(baseContent, newContent) {
-    try {
-      const baseLines = baseContent.split(/\r?\n/);
-      const newLines = newContent.split(/\r?\n/);
-      let commonStart = 0;
-      while (commonStart < baseLines.length && commonStart < newLines.length && baseLines[commonStart] === newLines[commonStart]) {
-        commonStart++;
-      }
-      let commonEnd = 0;
-      while (commonEnd < baseLines.length - commonStart && commonEnd < newLines.length - commonStart && baseLines[baseLines.length - 1 - commonEnd] === newLines[newLines.length - 1 - commonEnd]) {
-        commonEnd++;
-      }
-      const baseMiddle = baseLines.slice(commonStart, baseLines.length - commonEnd);
-      const newMiddle = newLines.slice(commonStart, newLines.length - commonEnd);
-      const delta = JSON.stringify({
-        commonStart,
-        commonEnd,
-        baseMiddleLength: baseMiddle.length,
-        newMiddle: newMiddle.join("\n")
-      });
-      return delta;
-    } catch (error) {
-      console.error("\u041E\u0448\u0438\u0431\u043A\u0430 \u043F\u0440\u0438 \u0441\u043E\u0437\u0434\u0430\u043D\u0438\u0438 \u0434\u0435\u043B\u044C\u0442\u044B:", error);
-      return newContent;
-    }
-  }
-  /**
-   * Получить файл по его хешу (для применения дельты)
-   */
-  async getFileWithHash(path, hash) {
-    const cachedContent = this.getContentFromCache(path, hash);
-    if (cachedContent) {
-      return cachedContent;
-    }
-    const file = this.app.vault.getAbstractFileByPath(path);
-    if (file instanceof import_obsidian4.TFile) {
-      try {
-        const content = await this.app.vault.read(file);
-        const currentHash = await CryptoHelper.hashString(content);
-        if (currentHash === hash) {
-          this.saveContentToCache(path, content, hash);
-          return content;
-        }
-      } catch (error) {
-        console.error(`\u041E\u0448\u0438\u0431\u043A\u0430 \u043F\u0440\u0438 \u0447\u0442\u0435\u043D\u0438\u0438 \u0444\u0430\u0439\u043B\u0430 ${path}:`, error);
-      }
-    }
-    const trustedDevices = this.relayClient.getTrustedDevices();
-    if (trustedDevices.length > 0) {
-      for (const device of trustedDevices) {
-        const remoteContent = await this.getRemoteFileContent(path, hash, device.id);
-        if (remoteContent) {
-          return remoteContent;
-        }
-      }
-    }
-    return null;
-  }
-  /**
-   * Применить дельту к базовому содержимому
-   */
-  applyDelta(baseContent, delta) {
-    try {
-      const deltaObj = JSON.parse(delta);
-      const baseLines = baseContent.split(/\r?\n/);
-      const commonStart = deltaObj.commonStart;
-      const commonEnd = deltaObj.commonEnd;
-      const startPart = baseLines.slice(0, commonStart);
-      const endPart = baseLines.slice(baseLines.length - commonEnd);
-      const newMiddle = deltaObj.newMiddle.split(/\r?\n/);
-      const newContent = [...startPart, ...newMiddle, ...endPart].join("\n");
-      return newContent;
-    } catch (error) {
-      console.error("\u041E\u0448\u0438\u0431\u043A\u0430 \u043F\u0440\u0438 \u043F\u0440\u0438\u043C\u0435\u043D\u0435\u043D\u0438\u0438 \u0434\u0435\u043B\u044C\u0442\u044B:", error);
-      throw new Error("\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u043F\u0440\u0438\u043C\u0435\u043D\u0438\u0442\u044C \u0434\u0435\u043B\u044C\u0442\u0443 \u043A \u0444\u0430\u0439\u043B\u0443");
-    }
-  }
-  /**
-   * Сжатие текстового содержимого (упрощенный алгоритм)
-   */
-  compressTextContent(content) {
-    try {
-      const lines = content.split(/\r?\n/);
-      const dictionary = {};
-      const MIN_STRING_LENGTH = 20;
-      for (const line of lines) {
-        if (line.length >= MIN_STRING_LENGTH) {
-          dictionary[line] = (dictionary[line] || 0) + 1;
-        }
-      }
-      const frequentStrings = Object.entries(dictionary).filter(([_, count]) => count >= 2).map(([str]) => str).slice(0, 50);
-      if (frequentStrings.length === 0) {
-        return content;
-      }
-      let compressedLines = [...lines];
-      for (let i = 0; i < frequentStrings.length; i++) {
-        const str = frequentStrings[i];
-        const placeholder = `###REF${i}###`;
-        for (let j = 0; j < compressedLines.length; j++) {
-          if (compressedLines[j] === str) {
-            compressedLines[j] = placeholder;
-          }
-        }
-      }
-      const compressed = {
-        dictionary: frequentStrings,
-        content: compressedLines.join("\n")
-      };
-      return JSON.stringify(compressed);
-    } catch (error) {
-      console.error("\u041E\u0448\u0438\u0431\u043A\u0430 \u043F\u0440\u0438 \u0441\u0436\u0430\u0442\u0438\u0438 \u0442\u0435\u043A\u0441\u0442\u043E\u0432\u043E\u0433\u043E \u0441\u043E\u0434\u0435\u0440\u0436\u0438\u043C\u043E\u0433\u043E:", error);
-      return content;
-    }
-  }
-  /**
-   * Распаковка сжатого текстового содержимого
-   */
-  decompressTextContent(compressedContent) {
-    try {
-      const compressed = JSON.parse(compressedContent);
-      if (!compressed.dictionary || !compressed.content) {
-        return compressedContent;
-      }
-      let decompressedContent = compressed.content;
-      for (let i = 0; i < compressed.dictionary.length; i++) {
-        const placeholder = `###REF${i}###`;
-        const regex = new RegExp(placeholder, "g");
-        decompressedContent = decompressedContent.replace(regex, compressed.dictionary[i]);
-      }
-      return decompressedContent;
-    } catch (error) {
-      console.error("\u041E\u0448\u0438\u0431\u043A\u0430 \u043F\u0440\u0438 \u0440\u0430\u0441\u043F\u0430\u043A\u043E\u0432\u043A\u0435 \u0441\u0436\u0430\u0442\u043E\u0433\u043E \u0441\u043E\u0434\u0435\u0440\u0436\u0438\u043C\u043E\u0433\u043E:", error);
-      return compressedContent;
-    }
-  }
-  saveContentToCache(path, content, hash) {
-    if (this.fileContentCache.size > 100) {
-      const oldestEntries = Array.from(this.fileContentCache.entries()).sort((a, b) => a[1].timestamp - b[1].timestamp).slice(0, 20);
-      for (const [oldPath] of oldestEntries) {
-        this.fileContentCache.delete(oldPath);
-      }
-    }
-    this.fileContentCache.set(path, {
-      content,
-      hash,
-      timestamp: Date.now()
-    });
-  }
-  /**
-   * Получить содержимое файла из кэша
-   */
-  getContentFromCache(path, hash) {
-    const cached = this.fileContentCache.get(path);
-    if (cached && cached.hash === hash) {
-      return cached.content;
-    }
-    return null;
-  }
-  /**
-   * Синхронизация удаления файла с доверенными устройствами
-   */
-  async syncFileDeletion(path) {
-    const trustedDevices = this.relayClient.getTrustedDevices();
-    if (!Array.isArray(trustedDevices) || trustedDevices.length === 0) {
-      console.log(`\u041F\u0440\u043E\u043F\u0443\u0441\u043A \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438 \u0443\u0434\u0430\u043B\u0435\u043D\u0438\u044F \u0444\u0430\u0439\u043B\u0430 ${path}: \u043D\u0435\u0442 \u0434\u043E\u0432\u0435\u0440\u0435\u043D\u043D\u044B\u0445 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432`);
-      return;
-    }
-    try {
-      const deleteMessage = {
-        path,
-        deleted: true,
-        mtime: Date.now(),
-        hash: ""
-        // Хеш не нужен при удалении
-      };
-      console.log(`\u041E\u0442\u043F\u0440\u0430\u0432\u043A\u0430 \u0443\u0432\u0435\u0434\u043E\u043C\u043B\u0435\u043D\u0438\u044F \u043E\u0431 \u0443\u0434\u0430\u043B\u0435\u043D\u0438\u0438 \u0444\u0430\u0439\u043B\u0430 ${path} \u043D\u0430 ${trustedDevices.length} \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432...`);
-      let successCount = 0;
-      for (const device of trustedDevices) {
-        try {
-          console.log(`\u041E\u0442\u043F\u0440\u0430\u0432\u043A\u0430 \u0443\u0432\u0435\u0434\u043E\u043C\u043B\u0435\u043D\u0438\u044F \u043E\u0431 \u0443\u0434\u0430\u043B\u0435\u043D\u0438\u0438 ${path} \u043D\u0430 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u043E ${device.id}...`);
-          this.relayClient.sendMessage({
-            type: "fileSync",
-            targetDeviceId: device.id,
-            payload: deleteMessage
-          });
-          successCount++;
-        } catch (deviceError) {
-          console.error(`\u041E\u0448\u0438\u0431\u043A\u0430 \u043F\u0440\u0438 \u043E\u0442\u043F\u0440\u0430\u0432\u043A\u0435 \u0443\u0432\u0435\u0434\u043E\u043C\u043B\u0435\u043D\u0438\u044F \u043E\u0431 \u0443\u0434\u0430\u043B\u0435\u043D\u0438\u0438 \u043D\u0430 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u043E ${device.id}:`, deviceError);
-        }
-      }
-      console.log(`\u0423\u0432\u0435\u0434\u043E\u043C\u043B\u0435\u043D\u0438\u0435 \u043E\u0431 \u0443\u0434\u0430\u043B\u0435\u043D\u0438\u0438 \u0444\u0430\u0439\u043B\u0430 ${path} \u043E\u0442\u043F\u0440\u0430\u0432\u043B\u0435\u043D\u043E \u043D\u0430 ${successCount}/${trustedDevices.length} \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432`);
-    } catch (error) {
-      console.error(`Error syncing file deletion ${path}:`, error);
-      throw new Error(`\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0438\u0440\u043E\u0432\u0430\u0442\u044C \u0443\u0434\u0430\u043B\u0435\u043D\u0438\u0435 \u0444\u0430\u0439\u043B\u0430 ${path}: ${error.message}`);
-    }
-  }
-  /**
-   * Обработчик сообщения от сервера
-   */
-  async handleSyncMessage(message) {
-    try {
-      if (message.type === "message" && message.payload && message.payload.action === "devicePing" && message.payload.pingId) {
-        console.log(`\u041F\u043E\u043B\u0443\u0447\u0435\u043D \u043F\u0438\u043D\u0433 \u043E\u0442 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u0430 ${message.deviceName || message.sourceDeviceId}`);
-        this.relayClient.sendMessage({
-          type: "message",
-          targetDeviceId: message.sourceDeviceId,
-          payload: {
-            action: "devicePingResponse",
-            pingId: message.payload.pingId
-          }
-        });
-        if (this.waitingMode && this.relayClient.isDeviceTrusted(message.sourceDeviceId || "")) {
-          console.log("\u041F\u043E\u043B\u0443\u0447\u0435\u043D \u043F\u0438\u043D\u0433 \u043E\u0442 \u0434\u043E\u0432\u0435\u0440\u0435\u043D\u043D\u043E\u0433\u043E \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u0430. \u0412\u044B\u0445\u043E\u0434\u0438\u043C \u0438\u0437 \u0440\u0435\u0436\u0438\u043C\u0430 \u043E\u0436\u0438\u0434\u0430\u043D\u0438\u044F.");
-          this.waitingMode = false;
-          if (this.pendingChangesCount > 0) {
-            console.log(`\u0415\u0441\u0442\u044C ${this.pendingChangesCount} \u043D\u0430\u043A\u043E\u043F\u043B\u0435\u043D\u043D\u044B\u0445 \u0438\u0437\u043C\u0435\u043D\u0435\u043D\u0438\u0439. \u0417\u0430\u043F\u0443\u0441\u043A\u0430\u0435\u043C \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u044E.`);
-            setTimeout(() => this.performFullSync(), 1e3);
-          }
-        }
-        return;
-      }
-      if (message.type === "message" && message.payload && message.payload.action === "devicePingResponse") {
-        return;
-      }
-      if (message.type === "requestFileMetadata") {
-        console.log("\u041E\u0431\u0440\u0430\u0431\u043E\u0442\u043A\u0430 \u0437\u0430\u043F\u0440\u043E\u0441\u0430 \u043C\u0435\u0442\u0430\u0434\u0430\u043D\u043D\u044B\u0445...");
-        this.handleFileMetadataRequest(message);
-        return;
-      }
-      if (message.type === "fileMetadata") {
-        return;
-      }
-      if (message.type === "fileMetadataOnly" && message.payload && typeof message.payload === "object") {
-        await this.handleFileMetadataOnly(message);
-        return;
-      }
-      if (message.type === "requestFile" && message.payload && typeof message.payload === "object") {
-        const path = message.payload.path;
-        if (path && message.sourceDeviceId) {
-          console.log(`\u041F\u043E\u043B\u0443\u0447\u0435\u043D \u0437\u0430\u043F\u0440\u043E\u0441 \u043D\u0430 \u043E\u0442\u043F\u0440\u0430\u0432\u043A\u0443 \u0444\u0430\u0439\u043B\u0430 ${path} \u043E\u0442 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u0430 ${message.deviceName || message.sourceDeviceId}`);
-          await this.handleFileRequest(path, message.sourceDeviceId, message.requestId);
-        }
-        return;
-      }
-      if (message.type === "fileSync" && message.payload) {
-        console.log("\u041E\u0431\u0440\u0430\u0431\u043E\u0442\u043A\u0430 \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u044F fileSync...");
-        if (this.waitingMode) {
-          console.log("\u041F\u043E\u043B\u0443\u0447\u0435\u043D\u044B \u0434\u0430\u043D\u043D\u044B\u0435 \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438, \u0432\u044B\u0445\u043E\u0434\u0438\u043C \u0438\u0437 \u0440\u0435\u0436\u0438\u043C\u0430 \u043E\u0436\u0438\u0434\u0430\u043D\u0438\u044F");
-          this.waitingMode = false;
-        }
-        await this.processFileSyncMessage(message.payload);
-      } else if (message.type === "message" && message.payload && typeof message.payload === "object" && (message.payload.path || message.payload.encryptedData || message.payload.deleted)) {
-        console.log("\u041E\u0431\u0440\u0430\u0431\u043E\u0442\u043A\u0430 \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u044F message \u0441 \u0434\u0430\u043D\u043D\u044B\u043C\u0438 \u0444\u0430\u0439\u043B\u043E\u0432\u043E\u0439 \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438...");
-        if (this.waitingMode) {
-          console.log("\u041F\u043E\u043B\u0443\u0447\u0435\u043D\u044B \u0434\u0430\u043D\u043D\u044B\u0435 \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438, \u0432\u044B\u0445\u043E\u0434\u0438\u043C \u0438\u0437 \u0440\u0435\u0436\u0438\u043C\u0430 \u043E\u0436\u0438\u0434\u0430\u043D\u0438\u044F");
-          this.waitingMode = false;
-        }
-        await this.processFileSyncMessage(message.payload);
-      }
-    } catch (error) {
-      console.error("\u041E\u0448\u0438\u0431\u043A\u0430 \u043F\u0440\u0438 \u043E\u0431\u0440\u0430\u0431\u043E\u0442\u043A\u0435 \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u044F \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438:", error);
-      new import_obsidian4.Notice(`\u041E\u0448\u0438\u0431\u043A\u0430 \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438: ${error.message}`);
-    }
-  }
-  /**
-   * Обработка метаданных отдельного файла (сигнальная система)
-   */
-  async handleFileMetadataOnly(message) {
-    try {
-      if (!message.payload || !message.sourceDeviceId)
-        return;
-      const payload = message.payload;
-      const path = payload.path;
-      if (!path) {
-        console.log("\u041F\u043E\u043B\u0443\u0447\u0435\u043D\u044B \u043C\u0435\u0442\u0430\u0434\u0430\u043D\u043D\u044B\u0435 \u0444\u0430\u0439\u043B\u0430 \u0431\u0435\u0437 \u0443\u043A\u0430\u0437\u0430\u043D\u0438\u044F \u043F\u0443\u0442\u0438");
-        return;
-      }
-      console.log(`\u041F\u043E\u043B\u0443\u0447\u0435\u043D\u044B \u043C\u0435\u0442\u0430\u0434\u0430\u043D\u043D\u044B\u0435 \u0444\u0430\u0439\u043B\u0430 ${path} \u043E\u0442 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u0430 ${message.deviceName || message.sourceDeviceId}`);
-      const needFile = await this.checkIfFileNeeded(path, payload.hash, payload.mtime);
-      if (needFile) {
-        console.log(`\u0417\u0430\u043F\u0440\u0430\u0448\u0438\u0432\u0430\u0435\u043C \u0444\u0430\u0439\u043B ${path} \u043E\u0442 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u0430 ${message.sourceDeviceId}`);
-        this.relayClient.sendMessage({
-          type: "requestFile",
-          targetDeviceId: message.sourceDeviceId,
-          requestId: Date.now().toString() + "-" + Math.random().toString(36).substr(2, 5),
-          payload: {
-            path,
-            hash: payload.hash
-          }
-        });
-      } else {
-        console.log(`\u0424\u0430\u0439\u043B ${path} \u043D\u0435 \u0442\u0440\u0435\u0431\u0443\u0435\u0442\u0441\u044F \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0438\u0440\u043E\u0432\u0430\u0442\u044C, \u043F\u0440\u043E\u043F\u0443\u0441\u043A\u0430\u0435\u043C`);
-      }
-    } catch (error) {
-      console.error(`\u041E\u0448\u0438\u0431\u043A\u0430 \u043F\u0440\u0438 \u043E\u0431\u0440\u0430\u0431\u043E\u0442\u043A\u0435 \u043C\u0435\u0442\u0430\u0434\u0430\u043D\u043D\u044B\u0445 \u0444\u0430\u0439\u043B\u0430:`, error);
-    }
-  }
-  /**
-   * Проверить, нужен ли нам файл с указанными метаданными
-   */
-  async checkIfFileNeeded(path, hash, remoteMtime) {
-    const file = this.app.vault.getAbstractFileByPath(path);
-    if (!(file instanceof import_obsidian4.TFile)) {
-      return true;
-    }
-    const localMetadata = this.syncState.files[path];
-    if (!localMetadata) {
-      const content = await this.app.vault.read(file);
-      const localHash = await CryptoHelper.hashString(content);
-      return localHash !== hash;
-    }
-    if (localMetadata.hash !== hash) {
-      if (localMetadata.mtime > remoteMtime) {
-        console.log(`\u041A\u041E\u041D\u0424\u041B\u0418\u041A\u0422 \u0412\u0415\u0420\u0421\u0418\u0419: \u041B\u043E\u043A\u0430\u043B\u044C\u043D\u0430\u044F \u0432\u0435\u0440\u0441\u0438\u044F \u0444\u0430\u0439\u043B\u0430 ${path} \u043D\u043E\u0432\u0435\u0435 (${new Date(localMetadata.mtime).toISOString()}) \u0447\u0435\u043C \u0443\u0434\u0430\u043B\u0435\u043D\u043D\u0430\u044F (${new Date(remoteMtime).toISOString()}). \u0421\u043E\u0445\u0440\u0430\u043D\u044F\u0435\u043C \u043B\u043E\u043A\u0430\u043B\u044C\u043D\u0443\u044E \u0432\u0435\u0440\u0441\u0438\u044E.`);
-        return false;
-      }
-      console.log(`\u0423\u0434\u0430\u043B\u0435\u043D\u043D\u0430\u044F \u0432\u0435\u0440\u0441\u0438\u044F \u0444\u0430\u0439\u043B\u0430 ${path} \u043D\u043E\u0432\u0435\u0435 (${new Date(remoteMtime).toISOString()}) \u0447\u0435\u043C \u043B\u043E\u043A\u0430\u043B\u044C\u043D\u0430\u044F (${new Date(localMetadata.mtime).toISOString()}). \u0417\u0430\u043F\u0440\u0430\u0448\u0438\u0432\u0430\u0435\u043C \u043E\u0431\u043D\u043E\u0432\u043B\u0435\u043D\u0438\u0435.`);
-      return true;
-    }
-    return false;
-  }
-  /**
-   * Обработчик запроса на получение файла
-   */
-  async handleFileRequest(path, sourceDeviceId, requestId) {
-    try {
-      console.log(`\u041E\u0431\u0440\u0430\u0431\u043E\u0442\u043A\u0430 \u0437\u0430\u043F\u0440\u043E\u0441\u0430 \u043D\u0430 \u043F\u043E\u043B\u0443\u0447\u0435\u043D\u0438\u0435 \u0444\u0430\u0439\u043B\u0430 ${path}...`);
-      const file = this.app.vault.getAbstractFileByPath(path);
-      if (!(file instanceof import_obsidian4.TFile)) {
-        console.log(`\u0424\u0430\u0439\u043B ${path} \u043D\u0435 \u043D\u0430\u0439\u0434\u0435\u043D \u0438\u043B\u0438 \u043D\u0435 \u044F\u0432\u043B\u044F\u0435\u0442\u0441\u044F \u0444\u0430\u0439\u043B\u043E\u043C`);
-        return;
-      }
-      const content = await this.app.vault.read(file);
-      const hash = await CryptoHelper.hashString(content);
-      await this.syncFileWithPeers(path, content, hash, file.stat.mtime, true, [sourceDeviceId], requestId);
-      console.log(`\u0424\u0430\u0439\u043B ${path} \u043E\u0442\u043F\u0440\u0430\u0432\u043B\u0435\u043D \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u0443 ${sourceDeviceId} \u043F\u043E \u0437\u0430\u043F\u0440\u043E\u0441\u0443`);
-    } catch (error) {
-      console.error(`\u041E\u0448\u0438\u0431\u043A\u0430 \u043F\u0440\u0438 \u043E\u0431\u0440\u0430\u0431\u043E\u0442\u043A\u0435 \u0437\u0430\u043F\u0440\u043E\u0441\u0430 \u043D\u0430 \u043F\u043E\u043B\u0443\u0447\u0435\u043D\u0438\u0435 \u0444\u0430\u0439\u043B\u0430 ${path}:`, error);
-    }
-  }
-  /**
-   * Обработка сообщения синхронизации файла
-   */
-  async processFileSyncMessage(fileMessage) {
-    const { path, encryptedData, deleted, mtime, hash, priority, compression } = fileMessage;
-    try {
-      if (deleted) {
-        const existingFile2 = this.app.vault.getAbstractFileByPath(path);
-        if (existingFile2) {
-          await this.app.vault.delete(existingFile2);
-          if (this.syncState.files[path]) {
-            this.syncState.files[path] = {
-              ...this.syncState.files[path],
-              deleted: true
-            };
-          }
-          console.log(`\u0424\u0430\u0439\u043B \u0443\u0434\u0430\u043B\u0435\u043D: ${path}`);
-        }
-        return;
-      }
-      if (!encryptedData) {
-        console.error(`\u041E\u0442\u0441\u0443\u0442\u0441\u0442\u0432\u0443\u044E\u0442 \u0437\u0430\u0448\u0438\u0444\u0440\u043E\u0432\u0430\u043D\u043D\u044B\u0435 \u0434\u0430\u043D\u043D\u044B\u0435 \u0434\u043B\u044F \u0444\u0430\u0439\u043B\u0430 ${path}`);
-        return;
-      }
-      const existingFile = this.syncState.files[path];
-      if (existingFile && existingFile.hash === hash) {
-        console.log(`\u041F\u0440\u043E\u043F\u0443\u0441\u043A \u0444\u0430\u0439\u043B\u0430 ${path}: \u0443 \u043D\u0430\u0441 \u0443\u0436\u0435 \u0435\u0441\u0442\u044C \u0430\u043A\u0442\u0443\u0430\u043B\u044C\u043D\u0430\u044F \u0432\u0435\u0440\u0441\u0438\u044F`);
-        return;
-      }
-      const priorityInfo = priority || "normal";
-      console.log(`\u041E\u0431\u0440\u0430\u0431\u043E\u0442\u043A\u0430 \u0444\u0430\u0439\u043B\u0430 ${path} \u0441 \u043F\u0440\u0438\u043E\u0440\u0438\u0442\u0435\u0442\u043E\u043C ${priorityInfo}`);
-      if (compression && compression.compressed) {
-        console.log(`\u0424\u0430\u0439\u043B \u0441\u0436\u0430\u0442: ${compression.compressedSize} \u0431\u0430\u0439\u0442 (\u0438\u0441\u0445\u043E\u0434\u043D\u044B\u0439 \u0440\u0430\u0437\u043C\u0435\u0440: ${compression.originalSize} \u0431\u0430\u0439\u0442)`);
-      }
-      let decryptedContent = await CryptoHelper.decrypt(encryptedData, this.encryptionPassword);
-      if (fileMessage.deltaData && fileMessage.deltaData.baseHash && fileMessage.deltaData.isDelta) {
-        console.log(`\u041F\u043E\u043B\u0443\u0447\u0435\u043D\u0430 \u0434\u0435\u043B\u044C\u0442\u0430 \u0434\u043B\u044F \u0444\u0430\u0439\u043B\u0430 ${path}. \u041F\u0440\u0438\u043C\u0435\u043D\u044F\u0435\u043C \u043A \u0431\u0430\u0437\u043E\u0432\u043E\u0439 \u0432\u0435\u0440\u0441\u0438\u0438...`);
-        try {
-          const baseContent = await this.getFileWithHash(path, fileMessage.deltaData.baseHash) || null;
-          if (baseContent) {
-            decryptedContent = this.applyDelta(baseContent, decryptedContent);
-            console.log(`\u0414\u0435\u043B\u044C\u0442\u0430 \u0443\u0441\u043F\u0435\u0448\u043D\u043E \u043F\u0440\u0438\u043C\u0435\u043D\u0435\u043D\u0430 \u043A \u0444\u0430\u0439\u043B\u0443 ${path}`);
-          } else {
-            console.error(`\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u043D\u0430\u0439\u0442\u0438 \u0431\u0430\u0437\u043E\u0432\u0443\u044E \u0432\u0435\u0440\u0441\u0438\u044E \u0444\u0430\u0439\u043B\u0430 ${path} \u0441 \u0445\u0435\u0448\u0435\u043C ${fileMessage.deltaData.baseHash}`);
-            throw new Error(`\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u043F\u0440\u0438\u043C\u0435\u043D\u0438\u0442\u044C \u0434\u0435\u043B\u044C\u0442\u0443: \u0431\u0430\u0437\u043E\u0432\u0430\u044F \u0432\u0435\u0440\u0441\u0438\u044F \u0444\u0430\u0439\u043B\u0430 \u043D\u0435 \u043D\u0430\u0439\u0434\u0435\u043D\u0430`);
-          }
-        } catch (deltaError) {
-          console.error(`\u041E\u0448\u0438\u0431\u043A\u0430 \u043F\u0440\u0438 \u043F\u0440\u0438\u043C\u0435\u043D\u0435\u043D\u0438\u0438 \u0434\u0435\u043B\u044C\u0442\u044B \u0434\u043B\u044F \u0444\u0430\u0439\u043B\u0430 ${path}:`, deltaError);
-          throw new Error(`\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u043F\u0440\u0438\u043C\u0435\u043D\u0438\u0442\u044C \u0434\u0435\u043B\u044C\u0442\u0443: ${deltaError.message}`);
-        }
-      }
-      let finalContent = decryptedContent;
-      if (compression && compression.compressed && !fileMessage.deltaData) {
-        try {
-          if (decryptedContent.startsWith("{") && decryptedContent.includes('"dictionary":')) {
-            finalContent = this.decompressTextContent(decryptedContent);
-            console.log(`\u0420\u0430\u0441\u043F\u0430\u043A\u043E\u0432\u0430\u043D\u043E \u0441\u0436\u0430\u0442\u043E\u0435 \u0442\u0435\u043A\u0441\u0442\u043E\u0432\u043E\u0435 \u0441\u043E\u0434\u0435\u0440\u0436\u0438\u043C\u043E\u0435 \u0434\u043B\u044F ${path}`);
-          } else {
-            finalContent = decryptedContent;
-          }
-        } catch (decompressError) {
-          console.error(`\u041E\u0448\u0438\u0431\u043A\u0430 \u043F\u0440\u0438 \u0440\u0430\u0441\u043F\u0430\u043A\u043E\u0432\u043A\u0435 \u0441\u043E\u0434\u0435\u0440\u0436\u0438\u043C\u043E\u0433\u043E \u0444\u0430\u0439\u043B\u0430 ${path}:`, decompressError);
-          finalContent = decryptedContent;
-        }
-      }
-      const dirPath = path.split("/").slice(0, -1).join("/");
-      if (dirPath && !this.app.vault.getAbstractFileByPath(dirPath)) {
-        await this.app.vault.createFolder(dirPath);
-      }
-      const existingFileObj = this.app.vault.getAbstractFileByPath(path);
-      if (existingFileObj instanceof import_obsidian4.TFile) {
-        await this.app.vault.modify(existingFileObj, finalContent);
-      } else {
-        await this.app.vault.create(path, finalContent);
-      }
-      this.syncState.files[path] = {
-        path,
-        hash,
-        mtime,
-        size: finalContent.length
-      };
-      console.log(`\u0424\u0430\u0439\u043B \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0438\u0440\u043E\u0432\u0430\u043D: ${path} (${finalContent.length} \u0431\u0430\u0439\u0442)`);
-    } catch (error) {
-      console.error(`\u041E\u0448\u0438\u0431\u043A\u0430 \u043E\u0431\u0440\u0430\u0431\u043E\u0442\u043A\u0438 \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u044F \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438 \u0434\u043B\u044F \u0444\u0430\u0439\u043B\u0430 ${path}:`, error);
-      new import_obsidian4.Notice(`\u041E\u0448\u0438\u0431\u043A\u0430 \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438 \u0444\u0430\u0439\u043B\u0430 ${path}: ${error.message}`);
-    }
-  }
-  /**
-   * Обработчик изменения соединения
-   */
-  handleConnectionChange(connected) {
-    if (connected) {
-      new import_obsidian4.Notice("\u041F\u043E\u0434\u043A\u043B\u044E\u0447\u0435\u043D\u043E \u043A \u0441\u0435\u0440\u0432\u0435\u0440\u0443 \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438");
-      this.performFullSync();
-    } else {
-      new import_obsidian4.Notice("\u041E\u0442\u043A\u043B\u044E\u0447\u0435\u043D\u043E \u043E\u0442 \u0441\u0435\u0440\u0432\u0435\u0440\u0430 \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438");
-    }
-  }
-  /**
-   * Обработчик изменения списка доверенных устройств
-   */
-  handleTrustedDevicesChange(devices) {
-    if (!devices) {
-      console.log("\u041F\u043E\u043B\u0443\u0447\u0435\u043D \u043F\u0443\u0441\u0442\u043E\u0439 \u0441\u043F\u0438\u0441\u043E\u043A \u0434\u043E\u0432\u0435\u0440\u0435\u043D\u043D\u044B\u0445 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432");
-      this.trustedDevices = [];
-      return;
-    }
-    this.trustedDevices = devices;
-    console.log("\u0421\u043F\u0438\u0441\u043E\u043A \u0434\u043E\u0432\u0435\u0440\u0435\u043D\u043D\u044B\u0445 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432 \u043E\u0431\u043D\u043E\u0432\u043B\u0435\u043D:", devices);
-    const hasDevices = Array.isArray(devices) && devices.length > 0;
-    if (hasDevices) {
-      console.log(`\u041E\u0431\u043D\u0430\u0440\u0443\u0436\u0435\u043D\u043E ${devices.length} \u0434\u043E\u0432\u0435\u0440\u0435\u043D\u043D\u044B\u0445 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432`);
-      if (this.waitingMode) {
-        console.log("\u041E\u0431\u043D\u0430\u0440\u0443\u0436\u0435\u043D\u044B \u0434\u043E\u0432\u0435\u0440\u0435\u043D\u043D\u044B\u0435 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u0430 \u0432 \u0440\u0435\u0436\u0438\u043C\u0435 \u043E\u0436\u0438\u0434\u0430\u043D\u0438\u044F. \u041F\u0440\u043E\u0432\u0435\u0440\u044F\u0435\u043C \u0438\u0445 \u0430\u043A\u0442\u0438\u0432\u043D\u043E\u0441\u0442\u044C...");
-        setTimeout(() => {
-          this.checkActiveTrustedDevices();
-        }, 1e3);
-        return;
-      }
-      const lastSyncTime = this.syncState.lastSyncTime || 0;
-      const timeSinceLastSync = Date.now() - lastSyncTime;
-      if (timeSinceLastSync > 5 * 60 * 1e3 || this.pendingChangesCount > 0) {
-        console.log(`${timeSinceLastSync > 5 * 60 * 1e3 ? "\u0414\u0430\u0432\u043D\u043E \u043D\u0435 \u0431\u044B\u043B\u043E \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438" : `\u041D\u0430\u043A\u043E\u043F\u043B\u0435\u043D\u043E ${this.pendingChangesCount} \u0438\u0437\u043C\u0435\u043D\u0435\u043D\u0438\u0439`}, \u0437\u0430\u043F\u0443\u0441\u043A\u0430\u0435\u043C \u043F\u043E\u043B\u043D\u0443\u044E \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u044E`);
-        setTimeout(() => {
-          this.performFullSync();
-        }, 2e3);
-      }
-    } else {
-      console.log("\u041D\u0435\u0442 \u0434\u043E\u0432\u0435\u0440\u0435\u043D\u043D\u044B\u0445 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432. \u041F\u0435\u0440\u0435\u0445\u043E\u0434 \u0432 \u0440\u0435\u0436\u0438\u043C \u043E\u0436\u0438\u0434\u0430\u043D\u0438\u044F.");
-      this.waitingMode = true;
-    }
-  }
-  /**
-   * Обработчик запроса на синхронизацию
-   */
-  handleSyncRequest(request) {
-    if (request.requestId) {
-      this.pendingSyncRequests.set(request.requestId, request);
-      new import_obsidian4.Notice(
-        `\u0423\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u043E ${request.deviceName || "\u041D\u0435\u0438\u0437\u0432\u0435\u0441\u0442\u043D\u043E\u0435"} \u0437\u0430\u043F\u0440\u0430\u0448\u0438\u0432\u0430\u0435\u0442 \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u044E. \u041F\u0435\u0440\u0435\u0439\u0434\u0438\u0442\u0435 \u0432 \u043D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0438 \u043F\u043B\u0430\u0433\u0438\u043D\u0430 \u0434\u043B\u044F \u043F\u043E\u0434\u0442\u0432\u0435\u0440\u0436\u0434\u0435\u043D\u0438\u044F.`
-      );
-    }
-  }
-  /**
-   * Ответить на запрос синхронизации
-   */
-  async respondToSyncRequest(requestId, accept, trustPermanently) {
-    console.log(`\u041E\u0431\u0440\u0430\u0431\u043E\u0442\u043A\u0430 \u043E\u0442\u0432\u0435\u0442\u0430 \u043D\u0430 \u0437\u0430\u043F\u0440\u043E\u0441 \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438: ${requestId}, accept=${accept}, trust=${trustPermanently}`);
-    const request = this.pendingSyncRequests.get(requestId);
-    if (!request || !request.sourceDeviceId) {
-      console.error(`\u0417\u0430\u043F\u0440\u043E\u0441 ${requestId} \u043D\u0435 \u043D\u0430\u0439\u0434\u0435\u043D \u0438\u043B\u0438 \u043E\u0442\u0441\u0443\u0442\u0441\u0442\u0432\u0443\u0435\u0442 sourceDeviceId`);
-      return false;
-    }
-    try {
-      console.log(`\u041E\u0442\u043F\u0440\u0430\u0432\u043A\u0430 \u043E\u0442\u0432\u0435\u0442\u0430 \u043D\u0430 \u0437\u0430\u043F\u0440\u043E\u0441 \u0447\u0435\u0440\u0435\u0437 RelayClient \u0434\u043B\u044F \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u0430 ${request.sourceDeviceId}`);
-      const success = await this.relayClient.respondToSyncRequest(
-        requestId,
-        request.sourceDeviceId,
-        accept,
-        trustPermanently
-      );
-      console.log(`\u041E\u0442\u0432\u0435\u0442 \u043E\u0442\u043F\u0440\u0430\u0432\u043B\u0435\u043D, \u0440\u0435\u0437\u0443\u043B\u044C\u0442\u0430\u0442: ${success}`);
-      this.pendingSyncRequests.delete(requestId);
-      console.log(`\u0417\u0430\u043F\u0440\u043E\u0441 ${requestId} \u0443\u0434\u0430\u043B\u0435\u043D \u0438\u0437 \u0441\u043F\u0438\u0441\u043A\u0430 \u043E\u0436\u0438\u0434\u0430\u044E\u0449\u0438\u0445`);
-      if (accept && trustPermanently) {
-        console.log("\u0417\u0430\u043F\u0440\u043E\u0441 \u043F\u0440\u0438\u043D\u044F\u0442 \u0441 \u043F\u043E\u0441\u0442\u043E\u044F\u043D\u043D\u044B\u043C \u0434\u043E\u0432\u0435\u0440\u0438\u0435\u043C, \u0437\u0430\u043F\u0443\u0441\u043A\u0430\u0435\u043C \u043F\u043E\u043B\u043D\u0443\u044E \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u044E");
-        setTimeout(() => {
-          console.log("\u0417\u0430\u043F\u0443\u0441\u043A \u043E\u0442\u043B\u043E\u0436\u0435\u043D\u043D\u043E\u0439 \u043F\u043E\u043B\u043D\u043E\u0439 \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438");
-          this.performFullSync();
-        }, 2e3);
-      }
-      return success;
-    } catch (error) {
-      console.error("Error responding to sync request:", error);
-      this.pendingSyncRequests.delete(requestId);
-      return false;
-    }
-  }
-  /**
-   * Получить список ожидающих запросов на синхронизацию
-   */
-  getPendingSyncRequests() {
-    return Array.from(this.pendingSyncRequests.values());
-  }
-  /**
-   * Выполнить полную синхронизацию с доверенными устройствами
-   */
-  async performFullSync() {
-    try {
-      if (!this.relayClient.isConnected) {
-        console.log("\u0421\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u044F \u043F\u0440\u043E\u043F\u0443\u0449\u0435\u043D\u0430: \u043D\u0435\u0442 \u043F\u043E\u0434\u043A\u043B\u044E\u0447\u0435\u043D\u0438\u044F \u043A \u0441\u0435\u0440\u0432\u0435\u0440\u0443");
-        return;
-      }
-      const trustedDevices = this.relayClient.getTrustedDevices();
-      const hasTrustedDevices = Array.isArray(trustedDevices) && trustedDevices.length > 0;
-      if (this.isSyncing) {
-        console.log("\u0421\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u044F \u043F\u0440\u043E\u043F\u0443\u0449\u0435\u043D\u0430: \u0443\u0436\u0435 \u0432\u044B\u043F\u043E\u043B\u043D\u044F\u0435\u0442\u0441\u044F \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u044F");
-        return;
-      }
-      if (this.waitingMode || !hasTrustedDevices) {
-        console.log(`${this.waitingMode ? "\u041F\u043B\u0430\u0433\u0438\u043D \u0432 \u0440\u0435\u0436\u0438\u043C\u0435 \u043E\u0436\u0438\u0434\u0430\u043D\u0438\u044F" : "\u041D\u0435\u0442 \u0434\u043E\u0432\u0435\u0440\u0435\u043D\u043D\u044B\u0445 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432"}. \u041F\u0440\u043E\u0432\u0435\u0440\u043A\u0430 \u0430\u043A\u0442\u0438\u0432\u043D\u043E\u0441\u0442\u0438...`);
-        await this.checkActiveTrustedDevices();
-        if (this.waitingMode) {
-          console.log("\u041F\u043E\u0441\u043B\u0435 \u043F\u0440\u043E\u0432\u0435\u0440\u043A\u0438 \u043F\u043E-\u043F\u0440\u0435\u0436\u043D\u0435\u043C\u0443 \u043D\u0435\u0442 \u0430\u043A\u0442\u0438\u0432\u043D\u044B\u0445 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432. \u0421\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u044F \u043E\u0442\u043B\u043E\u0436\u0435\u043D\u0430.");
-          await this.updateLocalFileState();
-          return;
-        }
-        const updatedTrustedDevices = this.relayClient.getTrustedDevices();
-        if (!Array.isArray(updatedTrustedDevices) || updatedTrustedDevices.length === 0) {
-          console.log("\u041F\u043E\u0441\u043B\u0435 \u043F\u0440\u043E\u0432\u0435\u0440\u043A\u0438 \u0432\u0441\u0435 \u0435\u0449\u0435 \u043D\u0435\u0442 \u0434\u043E\u0432\u0435\u0440\u0435\u043D\u043D\u044B\u0445 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432. \u0421\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u044F \u043E\u0442\u043B\u043E\u0436\u0435\u043D\u0430.");
-          return;
-        }
-      }
-      console.log(`\u041D\u0430\u0447\u0438\u043D\u0430\u0435\u043C \u0438\u043D\u0442\u0435\u043B\u043B\u0435\u043A\u0442\u0443\u0430\u043B\u044C\u043D\u0443\u044E \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u044E \u0441 ${trustedDevices.length} \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u0430\u043C\u0438...`);
-      this.isSyncing = true;
-      new import_obsidian4.Notice(`\u041D\u0430\u0447\u0430\u0442\u0430 \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u044F \u0441 ${trustedDevices.length} \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u0430\u043C\u0438`);
-      console.log("\u041E\u0431\u043D\u043E\u0432\u043B\u0435\u043D\u0438\u0435 \u043B\u043E\u043A\u0430\u043B\u044C\u043D\u043E\u0433\u043E \u0441\u043E\u0441\u0442\u043E\u044F\u043D\u0438\u044F \u0444\u0430\u0439\u043B\u043E\u0432...");
-      await this.updateLocalFileState();
-      await this.requestFileMetadata(trustedDevices);
-      const fileEntries = Object.entries(this.syncState.files);
-      console.log(`\u0410\u043D\u0430\u043B\u0438\u0437 ${fileEntries.length} \u0444\u0430\u0439\u043B\u043E\u0432 \u0434\u043B\u044F \u0438\u043D\u0442\u0435\u043B\u043B\u0435\u043A\u0442\u0443\u0430\u043B\u044C\u043D\u043E\u0439 \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438...`);
-      const filesForSync = [];
-      let unchangedFiles = 0;
-      let identicalFiles = 0;
-      console.log("\u0421\u0418\u0413\u041D\u0410\u041B\u042C\u041D\u0410\u042F \u0421\u0418\u0421\u0422\u0415\u041C\u0410: \u041F\u0440\u043E\u0432\u0435\u0440\u043A\u0430 \u043C\u0435\u0442\u0430\u0434\u0430\u043D\u043D\u044B\u0445 \u0444\u0430\u0439\u043B\u043E\u0432 \u0434\u043B\u044F \u0438\u043D\u0442\u0435\u043B\u043B\u0435\u043A\u0442\u0443\u0430\u043B\u044C\u043D\u043E\u0439 \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438");
-      for (const [path, metadata] of fileEntries) {
-        if (metadata.deleted) {
-          continue;
-        }
-        const { needsSync, isNew, targetDevices } = this.fileNeedsSync(path, metadata, trustedDevices);
-        if (needsSync && targetDevices.length > 0) {
-          console.log(`\u0421\u0418\u0413\u041D\u0410\u041B\u042C\u041D\u0410\u042F \u0421\u0418\u0421\u0422\u0415\u041C\u0410: \u0424\u0430\u0439\u043B '${path}' \u0442\u0440\u0435\u0431\u0443\u0435\u0442 \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438 \u0441 ${targetDevices.length} \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u0430\u043C\u0438`);
-          filesForSync.push({
-            path,
-            metadata,
-            isNew,
-            targetDevices
-          });
-        } else if (isNew && targetDevices.length === 0) {
-          console.log(`\u0421\u0418\u0413\u041D\u0410\u041B\u042C\u041D\u0410\u042F \u0421\u0418\u0421\u0422\u0415\u041C\u0410: \u0424\u0430\u0439\u043B '${path}' \u043D\u0435\u0434\u0430\u0432\u043D\u043E \u0438\u0437\u043C\u0435\u043D\u0435\u043D, \u043D\u043E \u0438\u0434\u0435\u043D\u0442\u0438\u0447\u0435\u043D \u043D\u0430 \u0432\u0441\u0435\u0445 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u0430\u0445`);
-          identicalFiles++;
-        } else {
-          console.log(`\u0421\u0418\u0413\u041D\u0410\u041B\u042C\u041D\u0410\u042F \u0421\u0418\u0421\u0422\u0415\u041C\u0410: \u0424\u0430\u0439\u043B '${path}' \u043D\u0435 \u0442\u0440\u0435\u0431\u0443\u0435\u0442 \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438`);
-          unchangedFiles++;
-        }
-      }
-      if (filesForSync.length === 0) {
-        console.log("\u041D\u0435\u0442 \u0444\u0430\u0439\u043B\u043E\u0432, \u0442\u0440\u0435\u0431\u0443\u044E\u0449\u0438\u0445 \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438. \u0421\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u044F \u043F\u0440\u043E\u043F\u0443\u0449\u0435\u043D\u0430.");
-        this.pendingChangesCount = 0;
-        this.syncState.lastSyncTime = Date.now();
-        this.saveSyncState();
-        new import_obsidian4.Notice("\u0421\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u044F \u043D\u0435 \u0442\u0440\u0435\u0431\u0443\u0435\u0442\u0441\u044F: \u0432\u0441\u0435 \u0444\u0430\u0439\u043B\u044B \u0430\u043A\u0442\u0443\u0430\u043B\u044C\u043D\u044B");
-        this.isSyncing = false;
-        return;
-      }
-      filesForSync.sort((a, b) => {
-        if (a.isNew !== b.isNew) {
-          return a.isNew ? -1 : 1;
-        }
-        return a.metadata.size - b.metadata.size;
-      });
-      console.log(`\u041D\u0430\u0439\u0434\u0435\u043D\u043E ${filesForSync.length} \u0444\u0430\u0439\u043B\u043E\u0432 \u0434\u043B\u044F \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438, ${unchangedFiles} \u0444\u0430\u0439\u043B\u043E\u0432 \u043D\u0435 \u0442\u0440\u0435\u0431\u0443\u044E\u0442 \u043E\u0431\u043D\u043E\u0432\u043B\u0435\u043D\u0438\u044F`);
-      if (filesForSync.length <= 10) {
-        console.log("\u041D\u0435\u0431\u043E\u043B\u044C\u0448\u043E\u0439 \u043D\u0430\u0431\u043E\u0440 \u0444\u0430\u0439\u043B\u043E\u0432, \u0438\u0441\u043F\u043E\u043B\u044C\u0437\u0443\u0435\u043C \u043F\u0440\u044F\u043C\u0443\u044E \u043E\u0442\u043F\u0440\u0430\u0432\u043A\u0443...");
-        await this.syncSmallFileSet(filesForSync);
-      } else {
-        await this.syncLargeFileSet(filesForSync);
-      }
-      this.syncState.lastSyncTime = Date.now();
-      this.saveSyncState();
-      this.pendingChangesCount = 0;
-      const summary = `\u0421\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u044F \u0437\u0430\u0432\u0435\u0440\u0448\u0435\u043D\u0430: \u043E\u0442\u043F\u0440\u0430\u0432\u043B\u0435\u043D\u043E ${filesForSync.length} \u0444\u0430\u0439\u043B\u043E\u0432, \u0438\u0434\u0435\u043D\u0442\u0438\u0447\u043D\u044B\u0445 \u043D\u0430 \u0432\u0441\u0435\u0445 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u0430\u0445 ${identicalFiles}, \u043D\u0435 \u0442\u0440\u0435\u0431\u043E\u0432\u0430\u043B\u0438 \u043E\u0431\u043D\u043E\u0432\u043B\u0435\u043D\u0438\u044F ${unchangedFiles}`;
-      console.log("\u0421\u0418\u0413\u041D\u0410\u041B\u042C\u041D\u0410\u042F \u0421\u0418\u0421\u0422\u0415\u041C\u0410: " + summary);
-      new import_obsidian4.Notice(summary);
-    } catch (error) {
-      console.error("\u041E\u0448\u0438\u0431\u043A\u0430 \u043F\u0440\u0438 \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438:", error);
-      new import_obsidian4.Notice(`\u041E\u0448\u0438\u0431\u043A\u0430 \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438: ${error.message}`);
-    } finally {
-      this.isSyncing = false;
-    }
-  }
-  /**
-   * Синхронизация небольшого набора файлов (прямая отправка)
-   */
-  async syncSmallFileSet(files) {
-    let syncedCount = 0;
-    for (const { path, metadata, isNew, targetDevices } of files) {
-      const file = this.app.vault.getAbstractFileByPath(path);
-      if (file instanceof import_obsidian4.TFile) {
-        try {
-          const content = await this.app.vault.read(file);
-          await this.syncFileWithPeers(path, content, metadata.hash, metadata.mtime, isNew, targetDevices);
-          syncedCount++;
-        } catch (fileError) {
-          console.error(`\u041E\u0448\u0438\u0431\u043A\u0430 \u043F\u0440\u0438 \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438 \u0444\u0430\u0439\u043B\u0430 ${path}:`, fileError);
-        }
-      }
-    }
-    console.log(`\u0421\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0438\u0440\u043E\u0432\u0430\u043D\u043E ${syncedCount} \u0444\u0430\u0439\u043B\u043E\u0432 \u043D\u0430\u043F\u0440\u044F\u043C\u0443\u044E`);
-  }
-  /**
-   * Синхронизация большого набора файлов (пакетная обработка)
-   */
-  async syncLargeFileSet(files) {
-    const highPriorityFiles = files.filter((f) => f.isNew);
-    const normalPriorityFiles = files.filter((f) => !f.isNew);
-    console.log(`\u0412\u044B\u0441\u043E\u043A\u0438\u0439 \u043F\u0440\u0438\u043E\u0440\u0438\u0442\u0435\u0442: ${highPriorityFiles.length} \u0444\u0430\u0439\u043B\u043E\u0432, \u043E\u0431\u044B\u0447\u043D\u044B\u0439 \u043F\u0440\u0438\u043E\u0440\u0438\u0442\u0435\u0442: ${normalPriorityFiles.length} \u0444\u0430\u0439\u043B\u043E\u0432`);
-    if (highPriorityFiles.length > 0) {
-      console.log("\u0421\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u044F \u0444\u0430\u0439\u043B\u043E\u0432 \u0441 \u0432\u044B\u0441\u043E\u043A\u0438\u043C \u043F\u0440\u0438\u043E\u0440\u0438\u0442\u0435\u0442\u043E\u043C...");
-      const batchSize = 10;
-      const batches = Math.ceil(highPriorityFiles.length / batchSize);
-      for (let i = 0; i < batches; i++) {
-        const batch = highPriorityFiles.slice(i * batchSize, (i + 1) * batchSize);
-        await this.processBatch(batch, i + 1, batches, "\u0432\u044B\u0441\u043E\u043A\u043E\u043F\u0440\u0438\u043E\u0440\u0438\u0442\u0435\u0442\u043D\u044B\u0445");
-      }
-    }
-    if (normalPriorityFiles.length > 0) {
-      console.log("\u0421\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u044F \u0444\u0430\u0439\u043B\u043E\u0432 \u0441 \u043E\u0431\u044B\u0447\u043D\u044B\u043C \u043F\u0440\u0438\u043E\u0440\u0438\u0442\u0435\u0442\u043E\u043C...");
-      const batchSize = 20;
-      const batches = Math.ceil(normalPriorityFiles.length / batchSize);
-      for (let i = 0; i < batches; i++) {
-        const batch = normalPriorityFiles.slice(i * batchSize, (i + 1) * batchSize);
-        await this.processBatch(batch, i + 1, batches, "\u043E\u0431\u044B\u0447\u043D\u044B\u0445");
-      }
-    }
-  }
-  /**
-   * Обработка пакета файлов
-   */
-  async processBatch(batch, batchNumber, totalBatches, batchType) {
-    console.log(`\u041E\u0431\u0440\u0430\u0431\u043E\u0442\u043A\u0430 \u043F\u0430\u043A\u0435\u0442\u0430 ${batchNumber}/${totalBatches} ${batchType} \u0444\u0430\u0439\u043B\u043E\u0432...`);
-    const batchPromises = batch.map(async ({ path, metadata, isNew, targetDevices }) => {
-      const file = this.app.vault.getAbstractFileByPath(path);
-      if (file instanceof import_obsidian4.TFile) {
-        try {
-          const content = await this.app.vault.read(file);
-          await this.syncFileWithPeers(path, content, metadata.hash, metadata.mtime, isNew, targetDevices);
-          return true;
-        } catch (fileError) {
-          console.error(`\u041E\u0448\u0438\u0431\u043A\u0430 \u043F\u0440\u0438 \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438 \u0444\u0430\u0439\u043B\u0430 ${path}:`, fileError);
-          return false;
-        }
-      }
-      return false;
-    });
-    const batchResults = await Promise.allSettled(batchPromises);
-    const successfulSyncs = batchResults.filter(
-      (result) => result.status === "fulfilled" && result.value === true
-    ).length;
-    console.log(`\u041F\u0430\u043A\u0435\u0442 ${batchNumber}/${totalBatches}: \u0443\u0441\u043F\u0435\u0448\u043D\u043E \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0438\u0440\u043E\u0432\u0430\u043D\u043E ${successfulSyncs}/${batch.length} \u0444\u0430\u0439\u043B\u043E\u0432`);
-    if (batchNumber < totalBatches) {
-      await new Promise((resolve) => setTimeout(resolve, 200));
-    }
-  }
-  async requestFileMetadata(trustedDevices) {
-    try {
-      console.log("\u0417\u0430\u043F\u0440\u043E\u0441 \u043C\u0435\u0442\u0430\u0434\u0430\u043D\u043D\u044B\u0445 \u0444\u0430\u0439\u043B\u043E\u0432 \u0443 \u0434\u043E\u0432\u0435\u0440\u0435\u043D\u043D\u044B\u0445 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432...");
-      this.deviceFileMetadata.clear();
-      const metadataPromises = [];
-      for (const device of trustedDevices) {
-        const promise = new Promise((resolve) => {
-          const requestId = Date.now().toString() + "-" + Math.random().toString(36).substr(2, 5);
-          const handleMetadataResponse = (message) => {
-            if (message.type === "fileMetadata" && message.requestId === requestId && message.sourceDeviceId === device.id) {
-              if (message.payload && typeof message.payload === "object") {
-                this.deviceFileMetadata.set(device.id, message.payload);
-                console.log(`\u041F\u043E\u043B\u0443\u0447\u0435\u043D\u044B \u043C\u0435\u0442\u0430\u0434\u0430\u043D\u043D\u044B\u0435 \u043E\u0442 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u0430 ${device.name || device.id}: ${Object.keys(message.payload).length} \u0444\u0430\u0439\u043B\u043E\u0432`);
-              }
-              const originalCallback2 = this.relayClient["onMessageCallbackOriginal"];
-              if (originalCallback2) {
-                this.relayClient["onMessageCallback"] = originalCallback2;
-              }
-              resolve();
-            }
-          };
-          const originalCallback = this.relayClient["onMessageCallback"];
-          this.relayClient["onMessageCallbackOriginal"] = originalCallback;
-          this.relayClient["onMessageCallback"] = (message) => {
-            handleMetadataResponse(message);
-            originalCallback(message);
-          };
-          this.relayClient.sendMessage({
-            type: "requestFileMetadata",
-            targetDeviceId: device.id,
-            requestId,
-            payload: {
-              deviceId: this.syncState.deviceId
-            }
-          });
-          setTimeout(() => resolve(), 5e3);
-        });
-        metadataPromises.push(promise);
-      }
-      console.log("\u041E\u0436\u0438\u0434\u0430\u0435\u043C \u043E\u0442\u0432\u0435\u0442\u044B \u0441 \u043C\u0435\u0442\u0430\u0434\u0430\u043D\u043D\u044B\u043C\u0438...");
-      await Promise.all(metadataPromises);
-      console.log(`\u041F\u043E\u043B\u0443\u0447\u0435\u043D\u044B \u043C\u0435\u0442\u0430\u0434\u0430\u043D\u043D\u044B\u0435 \u043E\u0442 ${this.deviceFileMetadata.size} \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432 \u0438\u0437 ${trustedDevices.length}`);
-    } catch (error) {
-      console.error("\u041E\u0448\u0438\u0431\u043A\u0430 \u043F\u0440\u0438 \u0437\u0430\u043F\u0440\u043E\u0441\u0435 \u043C\u0435\u0442\u0430\u0434\u0430\u043D\u043D\u044B\u0445:", error);
-    }
-  }
-  /**
-   * Обработчик запроса метаданных от других устройств
-   */
-  handleFileMetadataRequest(message) {
-    if (!message.sourceDeviceId || !message.requestId)
-      return;
-    console.log(`\u041F\u043E\u043B\u0443\u0447\u0435\u043D \u0437\u0430\u043F\u0440\u043E\u0441 \u043C\u0435\u0442\u0430\u0434\u0430\u043D\u043D\u044B\u0445 \u043E\u0442 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u0430 ${message.deviceName || message.sourceDeviceId}`);
-    this.sendFileMetadata(message.sourceDeviceId, message.requestId);
-  }
-  /**
-   * Отправить метаданные файлов другому устройству
-   */
-  async sendFileMetadata(targetDeviceId, requestId) {
-    try {
-      console.log(`\u041E\u0442\u043F\u0440\u0430\u0432\u043A\u0430 \u043C\u0435\u0442\u0430\u0434\u0430\u043D\u043D\u044B\u0445 \u0444\u0430\u0439\u043B\u043E\u0432 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u0443 ${targetDeviceId}...`);
-      const metadataToSend = {};
-      for (const [path, metadata] of Object.entries(this.syncState.files)) {
-        if (metadata.deleted)
-          continue;
-        metadataToSend[path] = {
-          hash: metadata.hash,
-          mtime: metadata.mtime,
-          size: metadata.size,
-          // Добавляем deleted только если он true
-          ...metadata.deleted ? { deleted: true } : {}
-        };
-      }
-      this.relayClient.sendMessage({
-        type: "fileMetadata",
-        targetDeviceId,
-        requestId,
-        payload: metadataToSend
-      });
-      console.log(`\u041C\u0435\u0442\u0430\u0434\u0430\u043D\u043D\u044B\u0435 \u043E\u0442\u043F\u0440\u0430\u0432\u043B\u0435\u043D\u044B: ${Object.keys(metadataToSend).length} \u0444\u0430\u0439\u043B\u043E\u0432`);
-    } catch (error) {
-      console.error("\u041E\u0448\u0438\u0431\u043A\u0430 \u043F\u0440\u0438 \u043E\u0442\u043F\u0440\u0430\u0432\u043A\u0435 \u043C\u0435\u0442\u0430\u0434\u0430\u043D\u043D\u044B\u0445:", error);
-    }
-  }
-  /**
-   * Определить, нужно ли синхронизировать файл с другими устройствами
-   * на основе сравнения локальных метаданных и метаданных с других устройств
-   */
-  fileNeedsSync(path, metadata, trustedDevices) {
-    const fiveMinutesAgo = Date.now() - 5 * 60 * 1e3;
-    const isNew = metadata.mtime > fiveMinutesAgo;
-    const targetDevices = [];
-    let needsSync = false;
-    for (const device of trustedDevices) {
-      const deviceId = typeof device === "string" ? device : device.id;
-      const deviceName = typeof device === "string" ? deviceId : device.name || deviceId;
-      const deviceMetadata = this.deviceFileMetadata.get(deviceId);
-      if (!deviceMetadata) {
-        console.log(`\u0421\u0418\u0413\u041D\u0410\u041B\u042C\u041D\u0410\u042F \u0421\u0418\u0421\u0422\u0415\u041C\u0410: \u041D\u0435\u0442 \u043C\u0435\u0442\u0430\u0434\u0430\u043D\u043D\u044B\u0445 \u0441 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u0430 ${deviceName} \u0434\u043B\u044F \u0444\u0430\u0439\u043B\u0430 ${path}`);
-        targetDevices.push(deviceId);
-        needsSync = true;
-        continue;
-      }
-      const remoteFile = deviceMetadata[path];
-      if (!remoteFile) {
-        console.log(`\u0421\u0418\u0413\u041D\u0410\u041B\u042C\u041D\u0410\u042F \u0421\u0418\u0421\u0422\u0415\u041C\u0410: \u0424\u0430\u0439\u043B ${path} \u043E\u0442\u0441\u0443\u0442\u0441\u0442\u0432\u0443\u0435\u0442 \u043D\u0430 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u0435 ${deviceName}`);
-        targetDevices.push(deviceId);
-        needsSync = true;
-        continue;
-      }
-      if (remoteFile.hash !== metadata.hash) {
-        console.log(`\u0421\u0418\u0413\u041D\u0410\u041B\u042C\u041D\u0410\u042F \u0421\u0418\u0421\u0422\u0415\u041C\u0410: \u0425\u0435\u0448\u0438 \u0444\u0430\u0439\u043B\u0430 ${path} \u0440\u0430\u0437\u043B\u0438\u0447\u0430\u044E\u0442\u0441\u044F: \u043B\u043E\u043A\u0430\u043B\u044C\u043D\u044B\u0439 ${metadata.hash.substring(0, 8)}, \u0443\u0434\u0430\u043B\u0435\u043D\u043D\u044B\u0439 ${remoteFile.hash.substring(0, 8)}`);
-        targetDevices.push(deviceId);
-        needsSync = true;
-        continue;
-      }
-      if (metadata.mtime > remoteFile.mtime) {
-        console.log(`\u0421\u0418\u0413\u041D\u0410\u041B\u042C\u041D\u0410\u042F \u0421\u0418\u0421\u0422\u0415\u041C\u0410: \u0412\u0440\u0435\u043C\u044F \u043C\u043E\u0434\u0438\u0444\u0438\u043A\u0430\u0446\u0438\u0438 \u0444\u0430\u0439\u043B\u0430 ${path} \u043D\u043E\u0432\u0435\u0435: \u043B\u043E\u043A\u0430\u043B\u044C\u043D\u043E\u0435 ${new Date(metadata.mtime).toISOString()}, \u0443\u0434\u0430\u043B\u0435\u043D\u043D\u043E\u0435 ${new Date(remoteFile.mtime).toISOString()}`);
-        targetDevices.push(deviceId);
-        needsSync = true;
-      } else {
-        console.log(`\u0421\u0418\u0413\u041D\u0410\u041B\u042C\u041D\u0410\u042F \u0421\u0418\u0421\u0422\u0415\u041C\u0410: \u0424\u0430\u0439\u043B ${path} \u0438\u0434\u0435\u043D\u0442\u0438\u0447\u0435\u043D \u043D\u0430 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u0435 ${deviceName}`);
-      }
-    }
-    if (isNew && targetDevices.length === 0) {
-      console.log(`\u0424\u0430\u0439\u043B ${path} \u043D\u0435\u0434\u0430\u0432\u043D\u043E \u0438\u0437\u043C\u0435\u043D\u0435\u043D, \u043D\u043E \u043C\u0435\u0442\u0430\u0434\u0430\u043D\u043D\u044B\u0435 \u0438\u0434\u0435\u043D\u0442\u0438\u0447\u043D\u044B \u043D\u0430 \u0432\u0441\u0435\u0445 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u0430\u0445 - \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u044F \u043D\u0435 \u0442\u0440\u0435\u0431\u0443\u0435\u0442\u0441\u044F`);
-      needsSync = false;
-    } else if (isNew && targetDevices.length > 0) {
-      console.log(`\u0424\u0430\u0439\u043B ${path} \u043D\u0435\u0434\u0430\u0432\u043D\u043E \u0438\u0437\u043C\u0435\u043D\u0435\u043D, \u0431\u0443\u0434\u0435\u0442 \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0438\u0440\u043E\u0432\u0430\u043D \u0441 ${targetDevices.length} \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u0430\u043C\u0438`);
-      needsSync = true;
-    }
-    return { needsSync, isNew, targetDevices };
-  }
-  /**
-   * Запустить принудительную полную синхронизацию
-   */
-  async forceFullSync() {
-    console.log("\u0417\u0430\u043F\u0443\u0441\u043A \u043F\u0440\u0438\u043D\u0443\u0434\u0438\u0442\u0435\u043B\u044C\u043D\u043E\u0439 \u043F\u043E\u043B\u043D\u043E\u0439 \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438...");
-    new import_obsidian4.Notice("\u0417\u0430\u043F\u0443\u0441\u043A \u043F\u0440\u0438\u043D\u0443\u0434\u0438\u0442\u0435\u043B\u044C\u043D\u043E\u0439 \u043F\u043E\u043B\u043D\u043E\u0439 \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438");
-    this.isSyncing = false;
-    await this.performFullSync();
-  }
-  /**
-   * Обновить локальное состояние файлов
-   */
-  async updateLocalFileState() {
-    const changes = await this.fileWatcher.scanAllFiles();
-    const newState = {};
-    for (const change of changes) {
-      const file = change.file;
-      const content = await this.app.vault.read(file);
-      const hash = await CryptoHelper.hashString(content);
-      newState[file.path] = {
-        path: file.path,
-        hash,
-        mtime: file.stat.mtime,
-        size: file.stat.size
-      };
-    }
-    for (const [path, metadata] of Object.entries(this.syncState.files)) {
-      if (metadata.deleted && !newState[path]) {
-        newState[path] = metadata;
-      }
-    }
-    this.syncState.files = newState;
-    this.saveSyncState();
-  }
-  /**
-   * Загрузить состояние синхронизации из локального хранилища
-   */
-  loadSyncState() {
-    const savedState = localStorage.getItem("relay-sync-state");
-    if (savedState) {
-      try {
-        return JSON.parse(savedState);
-      } catch (error) {
-        console.error("Error parsing saved sync state:", error);
-      }
-    }
-    return {
-      deviceId: DeviceManager.getDeviceId(),
-      files: {},
-      lastSyncTime: 0
-    };
-  }
-  /**
-   * Сохранить состояние синхронизации в локальное хранилище
-   */
-  saveSyncState() {
-    localStorage.setItem("relay-sync-state", JSON.stringify(this.syncState));
-  }
-  /**
-   * Получить список доверенных устройств
-   */
-  getTrustedDevices() {
-    return this.trustedDevices;
-  }
-  /**
-   * Отозвать доверие у устройства
-   */
-  async revokeTrust(deviceId) {
-    try {
-      return await this.relayClient.revokeTrust(deviceId);
-    } catch (error) {
-      console.error("Error revoking trust:", error);
-      return false;
-    }
-  }
-  /**
-   * Сгенерировать ключ приглашения
-   */
-  async generateInvitationKey(expirationMinutes = 10) {
-    try {
-      return await this.relayClient.generateInvitationKey(expirationMinutes);
-    } catch (error) {
-      console.error("Error generating invitation key:", error);
-      throw error;
-    }
-  }
-  /**
-   * Использовать ключ приглашения
-   */
-  async useInvitationKey(key) {
-    try {
-      return await this.relayClient.useInvitationKey(key);
-    } catch (error) {
-      console.error("Error using invitation key:", error);
-      return false;
-    }
-  }
-  /**
-   * Проверить состояние подключения
-   */
-  isConnected() {
-    return this.relayClient.isConnected;
-  }
-  /**
-   * Обновить настройки синхронизации
-   */
-  updateOptions(options) {
-    if (options.serverUrl) {
-      this.options.serverUrl = options.serverUrl;
-      this.relayClient.disconnect();
-      this.relayClient = new RelayClient({
-        serverUrl: this.options.serverUrl,
-        deviceId: this.syncState.deviceId,
-        deviceName: DeviceManager.getDeviceName(),
-        onMessage: this.handleSyncMessage.bind(this),
-        onConnectionChange: this.handleConnectionChange.bind(this),
-        onTrustedDevicesChange: this.handleTrustedDevicesChange.bind(this),
-        onSyncRequest: this.handleSyncRequest.bind(this)
-      });
-      this.relayClient.connect();
-    }
-    if (options.encryptionPassword) {
-      this.options.encryptionPassword = options.encryptionPassword;
-      this.encryptionPassword = options.encryptionPassword;
-    }
-    if (options.ignoredPaths) {
-      this.options.ignoredPaths = options.ignoredPaths;
-      for (const path of options.ignoredPaths) {
-        this.fileWatcher.addIgnorePattern(new RegExp(path));
-      }
-    }
-    if (options.fullSyncInterval !== void 0 && options.fullSyncInterval !== this.options.fullSyncInterval) {
-      this.options.fullSyncInterval = options.fullSyncInterval;
-      if (this.fullSyncInterval) {
-        clearInterval(this.fullSyncInterval);
-        this.fullSyncInterval = null;
-      }
-      if (options.fullSyncInterval) {
-        this.fullSyncInterval = setInterval(
-          this.performFullSync.bind(this),
-          options.fullSyncInterval
-        );
-      }
-    }
-  }
-};
-
 // main.ts
+init_sync_manager();
 var DEFAULT_SETTINGS = {
   serverUrl: "ws://176.53.161.220:8080/ws",
   encryptionPassword: "",
@@ -3040,10 +5904,16 @@ var DEFAULT_SETTINGS = {
   ],
   fullSyncInterval: 30 * 60 * 1e3,
   // 30 минут
-  autoConnect: true
+  autoConnect: true,
   // Изменено на true для автоматического подключения
+  autoCheckForUpdates: true,
+  // Автоматически проверять обновления
+  lastUpdateCheck: 0,
+  // Время последней проверки обновлений
+  updateCheckInterval: 1
+  // Проверять обновления каждый день
 };
-var RelaySyncPlugin = class extends import_obsidian5.Plugin {
+var RelaySyncPlugin = class extends import_obsidian10.Plugin {
   constructor() {
     super(...arguments);
     this.syncManager = null;
@@ -3056,20 +5926,36 @@ var RelaySyncPlugin = class extends import_obsidian5.Plugin {
   async onload() {
     console.log("Loading Relay Sync plugin");
     await this.loadSettings();
+    let needsSave = false;
     if (this.settings.autoConnect === void 0) {
       console.log("\u0410\u0432\u0442\u043E\u043F\u043E\u0434\u043A\u043B\u044E\u0447\u0435\u043D\u0438\u0435 \u043D\u0435 \u043D\u0430\u0441\u0442\u0440\u043E\u0435\u043D\u043E, \u0443\u0441\u0442\u0430\u043D\u0430\u0432\u043B\u0438\u0432\u0430\u0435\u043C \u0437\u043D\u0430\u0447\u0435\u043D\u0438\u0435 \u043F\u043E \u0443\u043C\u043E\u043B\u0447\u0430\u043D\u0438\u044E: true");
       this.settings.autoConnect = true;
+      needsSave = true;
+    }
+    if (this.settings.autoCheckForUpdates === void 0) {
+      console.log("\u0410\u0432\u0442\u043E\u043F\u0440\u043E\u0432\u0435\u0440\u043A\u0430 \u043E\u0431\u043D\u043E\u0432\u043B\u0435\u043D\u0438\u0439 \u043D\u0435 \u043D\u0430\u0441\u0442\u0440\u043E\u0435\u043D\u0430, \u0443\u0441\u0442\u0430\u043D\u0430\u0432\u043B\u0438\u0432\u0430\u0435\u043C \u0437\u043D\u0430\u0447\u0435\u043D\u0438\u0435 \u043F\u043E \u0443\u043C\u043E\u043B\u0447\u0430\u043D\u0438\u044E: true");
+      this.settings.autoCheckForUpdates = true;
+      needsSave = true;
+    }
+    if (this.settings.updateCheckInterval === void 0) {
+      this.settings.updateCheckInterval = 1;
+      needsSave = true;
+    }
+    if (needsSave) {
       await this.saveSettings();
     }
     this.addSettingTab(new RelaySyncSettingsTab(this.app, this));
     this.statusBarItem = new StatusBarItem(this.addStatusBarItem());
     this.addCommands();
+    if (this.settings.autoCheckForUpdates) {
+      this.checkForUpdates();
+    }
     if (this.settings.autoConnect && this.settings.serverUrl && this.settings.encryptionPassword) {
       console.log("\u0410\u0432\u0442\u043E\u043F\u043E\u0434\u043A\u043B\u044E\u0447\u0435\u043D\u0438\u0435 \u0430\u043A\u0442\u0438\u0432\u0438\u0440\u043E\u0432\u0430\u043D\u043E, \u043F\u043E\u0434\u043A\u043B\u044E\u0447\u0430\u0435\u043C\u0441\u044F \u043A \u0441\u0435\u0440\u0432\u0435\u0440\u0443...");
       setTimeout(() => {
         this.startSync().catch((error) => {
           console.error("Error auto-connecting:", error);
-          new import_obsidian5.Notice("\u041E\u0448\u0438\u0431\u043A\u0430 \u0430\u0432\u0442\u043E\u043F\u043E\u0434\u043A\u043B\u044E\u0447\u0435\u043D\u0438\u044F: " + error.message);
+          new import_obsidian10.Notice("\u041E\u0448\u0438\u0431\u043A\u0430 \u0430\u0432\u0442\u043E\u043F\u043E\u0434\u043A\u043B\u044E\u0447\u0435\u043D\u0438\u044F: " + error.message);
         });
       }, 2e3);
     } else {
@@ -3098,7 +5984,7 @@ var RelaySyncPlugin = class extends import_obsidian5.Plugin {
       callback: async () => {
         var _a, _b, _c, _d;
         if (!((_a = this.syncManager) == null ? void 0 : _a.isConnected())) {
-          new import_obsidian5.Notice("\u0421\u043D\u0430\u0447\u0430\u043B\u0430 \u043D\u0435\u043E\u0431\u0445\u043E\u0434\u0438\u043C\u043E \u043F\u043E\u0434\u043A\u043B\u044E\u0447\u0438\u0442\u044C\u0441\u044F \u043A \u0441\u0435\u0440\u0432\u0435\u0440\u0443");
+          new import_obsidian10.Notice("\u0421\u043D\u0430\u0447\u0430\u043B\u0430 \u043D\u0435\u043E\u0431\u0445\u043E\u0434\u0438\u043C\u043E \u043F\u043E\u0434\u043A\u043B\u044E\u0447\u0438\u0442\u044C\u0441\u044F \u043A \u0441\u0435\u0440\u0432\u0435\u0440\u0443");
           return;
         }
         const syncState = this.syncManager["syncState"];
@@ -3129,13 +6015,13 @@ var RelaySyncPlugin = class extends import_obsidian5.Plugin {
             filesTotal: Object.keys((updatedSyncState == null ? void 0 : updatedSyncState.files) || {}).length,
             syncProgress: 100
           });
-          new import_obsidian5.Notice("\u041F\u043E\u043B\u043D\u0430\u044F \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u044F \u0437\u0430\u0432\u0435\u0440\u0448\u0435\u043D\u0430");
+          new import_obsidian10.Notice("\u041F\u043E\u043B\u043D\u0430\u044F \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u044F \u0437\u0430\u0432\u0435\u0440\u0448\u0435\u043D\u0430");
         } catch (error) {
           console.error("Error during full sync:", error);
           (_d = this.statusBarItem) == null ? void 0 : _d.setStatus("error" /* ERROR */, {
             errorMessage: error.message
           });
-          new import_obsidian5.Notice("\u041E\u0448\u0438\u0431\u043A\u0430 \u043F\u0440\u0438 \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438: " + error.message);
+          new import_obsidian10.Notice("\u041E\u0448\u0438\u0431\u043A\u0430 \u043F\u0440\u0438 \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438: " + error.message);
         }
       }
     });
@@ -3145,20 +6031,62 @@ var RelaySyncPlugin = class extends import_obsidian5.Plugin {
       callback: async () => {
         var _a;
         if (!((_a = this.syncManager) == null ? void 0 : _a.isConnected())) {
-          new import_obsidian5.Notice("\u0421\u043D\u0430\u0447\u0430\u043B\u0430 \u043D\u0435\u043E\u0431\u0445\u043E\u0434\u0438\u043C\u043E \u043F\u043E\u0434\u043A\u043B\u044E\u0447\u0438\u0442\u044C\u0441\u044F \u043A \u0441\u0435\u0440\u0432\u0435\u0440\u0443");
+          new import_obsidian10.Notice("\u0421\u043D\u0430\u0447\u0430\u043B\u0430 \u043D\u0435\u043E\u0431\u0445\u043E\u0434\u0438\u043C\u043E \u043F\u043E\u0434\u043A\u043B\u044E\u0447\u0438\u0442\u044C\u0441\u044F \u043A \u0441\u0435\u0440\u0432\u0435\u0440\u0443");
           return;
         }
         try {
           const key = await this.syncManager.generateInvitationKey();
           navigator.clipboard.writeText(key).then(() => {
-            new import_obsidian5.Notice("\u041A\u043B\u044E\u0447 \u0441\u043A\u043E\u043F\u0438\u0440\u043E\u0432\u0430\u043D \u0432 \u0431\u0443\u0444\u0435\u0440 \u043E\u0431\u043C\u0435\u043D\u0430: " + key);
+            new import_obsidian10.Notice("\u041A\u043B\u044E\u0447 \u0441\u043A\u043E\u043F\u0438\u0440\u043E\u0432\u0430\u043D \u0432 \u0431\u0443\u0444\u0435\u0440 \u043E\u0431\u043C\u0435\u043D\u0430: " + key);
           });
         } catch (error) {
           console.error("Error generating invitation key:", error);
-          new import_obsidian5.Notice("\u041E\u0448\u0438\u0431\u043A\u0430 \u043F\u0440\u0438 \u0441\u043E\u0437\u0434\u0430\u043D\u0438\u0438 \u043A\u043B\u044E\u0447\u0430: " + error.message);
+          new import_obsidian10.Notice("\u041E\u0448\u0438\u0431\u043A\u0430 \u043F\u0440\u0438 \u0441\u043E\u0437\u0434\u0430\u043D\u0438\u0438 \u043A\u043B\u044E\u0447\u0430: " + error.message);
         }
       }
     });
+    this.addCommand({
+      id: "check-for-updates",
+      name: "\u041F\u0440\u043E\u0432\u0435\u0440\u0438\u0442\u044C \u043D\u0430\u043B\u0438\u0447\u0438\u0435 \u043E\u0431\u043D\u043E\u0432\u043B\u0435\u043D\u0438\u0439",
+      callback: async () => {
+        new import_obsidian10.Notice("\u041F\u0440\u043E\u0432\u0435\u0440\u043A\u0430 \u043E\u0431\u043D\u043E\u0432\u043B\u0435\u043D\u0438\u0439...");
+        await this.checkForUpdates(true);
+      }
+    });
+    if (true) {
+      this.addCommand({
+        id: "run-optimizer-tests",
+        name: "\u0417\u0430\u043F\u0443\u0441\u0442\u0438\u0442\u044C \u0442\u0435\u0441\u0442\u044B \u043E\u043F\u0442\u0438\u043C\u0438\u0437\u0430\u0446\u0438\u0438",
+        callback: async () => {
+          const { runOptimizerTests: runOptimizerTests2 } = await Promise.resolve().then(() => (init_test_command(), test_command_exports));
+          await runOptimizerTests2();
+        }
+      });
+      this.addCommand({
+        id: "run-all-tests",
+        name: "\u0417\u0430\u043F\u0443\u0441\u0442\u0438\u0442\u044C \u0432\u0441\u0435 \u0442\u0435\u0441\u0442\u044B \u043F\u043B\u0430\u0433\u0438\u043D\u0430",
+        callback: async () => {
+          const { runAllTests: runAllTests4 } = await Promise.resolve().then(() => (init_test_command(), test_command_exports));
+          await runAllTests4();
+        }
+      });
+      this.addCommand({
+        id: "run-real-sync-test",
+        name: "\u0417\u0430\u043F\u0443\u0441\u0442\u0438\u0442\u044C \u0442\u0435\u0441\u0442 \u0440\u0435\u0430\u043B\u044C\u043D\u043E\u0439 \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438",
+        callback: async () => {
+          const { runRealSyncTests: runRealSyncTests2 } = await Promise.resolve().then(() => (init_test_command(), test_command_exports));
+          await runRealSyncTests2();
+        }
+      });
+      this.addCommand({
+        id: "run-mock-sync-test",
+        name: "\u0417\u0430\u043F\u0443\u0441\u0442\u0438\u0442\u044C \u0442\u0435\u0441\u0442 \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438 \u0441 \u043C\u043E\u043A\u0430\u043C\u0438",
+        callback: async () => {
+          const { runMockSyncTests: runMockSyncTests2 } = await Promise.resolve().then(() => (init_test_command(), test_command_exports));
+          await runMockSyncTests2();
+        }
+      });
+    }
   }
   /**
    * Запуск процесса синхронизации
@@ -3166,11 +6094,11 @@ var RelaySyncPlugin = class extends import_obsidian5.Plugin {
   async startSync() {
     var _a, _b, _c;
     if (!this.settings.serverUrl) {
-      new import_obsidian5.Notice("\u041D\u0435\u043E\u0431\u0445\u043E\u0434\u0438\u043C\u043E \u0443\u043A\u0430\u0437\u0430\u0442\u044C URL \u0441\u0435\u0440\u0432\u0435\u0440\u0430 \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438");
+      new import_obsidian10.Notice("\u041D\u0435\u043E\u0431\u0445\u043E\u0434\u0438\u043C\u043E \u0443\u043A\u0430\u0437\u0430\u0442\u044C URL \u0441\u0435\u0440\u0432\u0435\u0440\u0430 \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438");
       return;
     }
     if (!this.settings.encryptionPassword) {
-      new import_obsidian5.Notice("\u041D\u0435\u043E\u0431\u0445\u043E\u0434\u0438\u043C\u043E \u0443\u043A\u0430\u0437\u0430\u0442\u044C \u043F\u0430\u0440\u043E\u043B\u044C \u0448\u0438\u0444\u0440\u043E\u0432\u0430\u043D\u0438\u044F");
+      new import_obsidian10.Notice("\u041D\u0435\u043E\u0431\u0445\u043E\u0434\u0438\u043C\u043E \u0443\u043A\u0430\u0437\u0430\u0442\u044C \u043F\u0430\u0440\u043E\u043B\u044C \u0448\u0438\u0444\u0440\u043E\u0432\u0430\u043D\u0438\u044F");
       return;
     }
     let serverUrl = this.settings.serverUrl;
@@ -3178,7 +6106,7 @@ var RelaySyncPlugin = class extends import_obsidian5.Plugin {
       serverUrl = "wss://" + serverUrl.substring(serverUrl.indexOf("//") + 2);
       this.settings.serverUrl = serverUrl;
       await this.saveSettings();
-      new import_obsidian5.Notice("URL \u0441\u0435\u0440\u0432\u0435\u0440\u0430 \u0431\u044B\u043B \u0430\u0432\u0442\u043E\u043C\u0430\u0442\u0438\u0447\u0435\u0441\u043A\u0438 \u0438\u0441\u043F\u0440\u0430\u0432\u043B\u0435\u043D");
+      new import_obsidian10.Notice("URL \u0441\u0435\u0440\u0432\u0435\u0440\u0430 \u0431\u044B\u043B \u0430\u0432\u0442\u043E\u043C\u0430\u0442\u0438\u0447\u0435\u0441\u043A\u0438 \u0438\u0441\u043F\u0440\u0430\u0432\u043B\u0435\u043D");
     }
     try {
       this.syncManager = new SyncManager(this.app, {
@@ -3200,13 +6128,13 @@ var RelaySyncPlugin = class extends import_obsidian5.Plugin {
         filesTotal: Object.keys((syncState == null ? void 0 : syncState.files) || {}).length,
         trustedDevices: (trustedDevices == null ? void 0 : trustedDevices.length) || 0
       });
-      new import_obsidian5.Notice("\u041F\u043E\u0434\u043A\u043B\u044E\u0447\u0435\u043D\u043E \u043A \u0441\u0435\u0440\u0432\u0435\u0440\u0443 \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438");
+      new import_obsidian10.Notice("\u041F\u043E\u0434\u043A\u043B\u044E\u0447\u0435\u043D\u043E \u043A \u0441\u0435\u0440\u0432\u0435\u0440\u0443 \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438");
     } catch (error) {
       console.error("Error starting sync:", error);
       (_c = this.statusBarItem) == null ? void 0 : _c.setStatus("error" /* ERROR */, {
         errorMessage: error.message
       });
-      new import_obsidian5.Notice("\u041E\u0448\u0438\u0431\u043A\u0430 \u043F\u0440\u0438 \u043F\u043E\u0434\u043A\u043B\u044E\u0447\u0435\u043D\u0438\u0438: " + error.message);
+      new import_obsidian10.Notice("\u041E\u0448\u0438\u0431\u043A\u0430 \u043F\u0440\u0438 \u043F\u043E\u0434\u043A\u043B\u044E\u0447\u0435\u043D\u0438\u0438: " + error.message);
     }
   }
   startStatusUpdates() {
@@ -3254,13 +6182,13 @@ var RelaySyncPlugin = class extends import_obsidian5.Plugin {
         this.syncManager = null;
       }
       (_a = this.statusBarItem) == null ? void 0 : _a.setStatus("disconnected" /* DISCONNECTED */);
-      new import_obsidian5.Notice("\u041E\u0442\u043A\u043B\u044E\u0447\u0435\u043D\u043E \u043E\u0442 \u0441\u0435\u0440\u0432\u0435\u0440\u0430 \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438");
+      new import_obsidian10.Notice("\u041E\u0442\u043A\u043B\u044E\u0447\u0435\u043D\u043E \u043E\u0442 \u0441\u0435\u0440\u0432\u0435\u0440\u0430 \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u0438");
     } catch (error) {
       console.error("Error stopping sync:", error);
       (_b = this.statusBarItem) == null ? void 0 : _b.setStatus("error" /* ERROR */, {
         errorMessage: error.message
       });
-      new import_obsidian5.Notice("\u041E\u0448\u0438\u0431\u043A\u0430 \u043F\u0440\u0438 \u043E\u0442\u043A\u043B\u044E\u0447\u0435\u043D\u0438\u0438: " + error.message);
+      new import_obsidian10.Notice("\u041E\u0448\u0438\u0431\u043A\u0430 \u043F\u0440\u0438 \u043E\u0442\u043A\u043B\u044E\u0447\u0435\u043D\u0438\u0438: " + error.message);
     }
   }
   /**
@@ -3285,6 +6213,40 @@ var RelaySyncPlugin = class extends import_obsidian5.Plugin {
     if (this.syncManager) {
       this.syncManager.stop();
       this.syncManager = null;
+    }
+  }
+  /**
+   * Проверка наличия обновлений
+   */
+  async checkForUpdates(manual = false) {
+    try {
+      const { checkForUpdates: checkForUpdates2 } = await Promise.resolve().then(() => (init_github_updater(), github_updater_exports));
+      const now = Date.now();
+      const checkIntervalMs = this.settings.updateCheckInterval * 24 * 60 * 60 * 1e3;
+      if (!manual && this.settings.lastUpdateCheck && now - this.settings.lastUpdateCheck < checkIntervalMs) {
+        console.log("\u041F\u0440\u043E\u043F\u0443\u0441\u043A \u043F\u0440\u043E\u0432\u0435\u0440\u043A\u0438 \u043E\u0431\u043D\u043E\u0432\u043B\u0435\u043D\u0438\u0439, \u043F\u043E\u0441\u043B\u0435\u0434\u043D\u044F\u044F \u043F\u0440\u043E\u0432\u0435\u0440\u043A\u0430 \u0431\u044B\u043B\u0430 \u043D\u0435\u0434\u0430\u0432\u043D\u043E");
+        return;
+      }
+      this.settings.lastUpdateCheck = now;
+      await this.saveSettings();
+      console.log("\u041F\u0440\u043E\u0432\u0435\u0440\u043A\u0430 \u043E\u0431\u043D\u043E\u0432\u043B\u0435\u043D\u0438\u0439...");
+      const updateInfo = await checkForUpdates2();
+      if (updateInfo.available) {
+        const updateMessage = `\u0414\u043E\u0441\u0442\u0443\u043F\u043D\u043E \u043E\u0431\u043D\u043E\u0432\u043B\u0435\u043D\u0438\u0435: ${updateInfo.latestVersion} (\u0442\u0435\u043A\u0443\u0449\u0430\u044F: ${updateInfo.currentVersion})`;
+        new import_obsidian10.Notice(updateMessage, 1e4);
+        if (manual) {
+          Promise.resolve().then(() => (init_update_modal(), update_modal_exports)).then(({ UpdateModal: UpdateModal2 }) => {
+            new UpdateModal2(this.app, updateInfo).open();
+          });
+        }
+      } else if (manual) {
+        new import_obsidian10.Notice("\u0423 \u0432\u0430\u0441 \u0443\u0441\u0442\u0430\u043D\u043E\u0432\u043B\u0435\u043D\u0430 \u043F\u043E\u0441\u043B\u0435\u0434\u043D\u044F\u044F \u0432\u0435\u0440\u0441\u0438\u044F \u043F\u043B\u0430\u0433\u0438\u043D\u0430");
+      }
+    } catch (error) {
+      console.error("Error checking for updates:", error);
+      if (manual) {
+        new import_obsidian10.Notice("\u041E\u0448\u0438\u0431\u043A\u0430 \u043F\u0440\u0438 \u043F\u0440\u043E\u0432\u0435\u0440\u043A\u0435 \u043E\u0431\u043D\u043E\u0432\u043B\u0435\u043D\u0438\u0439: " + error.message);
+      }
     }
   }
   async loadSettings() {

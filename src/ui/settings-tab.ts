@@ -349,13 +349,19 @@ export class RelaySyncSettingsTab extends PluginSettingTab {
         
         // Интервал полной синхронизации
         new Setting(containerEl)
-            .setName('Интервал полной синхронизации')
-            .setDesc('Интервал в минутах между полными синхронизациями (0 для отключения)')
+            .setName('Интервал синхронизации')
+            .setDesc('Интервал в минутах между синхронизациями (0 для отключения периодической синхронизации)')
             .addText(text => text
                 .setPlaceholder('30')
                 .setValue(String(Math.floor(this.plugin.settings.fullSyncInterval / 60000) || 0))
                 .onChange(async (value) => {
-                    const minutes = parseInt(value) || 0;
+                    // Ограничиваем минимальное значение интервала 5 минутами, если включено
+                    let minutes = parseInt(value) || 0;
+                    if (minutes > 0 && minutes < 5) {
+                        new Notice('Минимальный интервал синхронизации - 5 минут');
+                        minutes = 5;
+                        text.setValue(String(minutes));
+                    }
                     this.plugin.settings.fullSyncInterval = minutes * 60000;
                     await this.plugin.saveSettings();
                     this.plugin.updateSyncOptions();
@@ -653,6 +659,56 @@ export class RelaySyncSettingsTab extends PluginSettingTab {
                 });
             }
         }
+        
+        // Секция обновлений
+        containerEl.createEl('h3', { text: 'Обновления' });
+        
+        // Автоматическая проверка обновлений
+        new Setting(containerEl)
+            .setName('Автоматическая проверка обновлений')
+            .setDesc('Периодически проверять наличие обновлений плагина')
+            .addToggle(toggle => toggle
+                .setValue(this.plugin.settings.autoCheckForUpdates)
+                .onChange(async (value) => {
+                    this.plugin.settings.autoCheckForUpdates = value;
+                    await this.plugin.saveSettings();
+                })
+            );
+        
+        // Интервал проверки обновлений
+        new Setting(containerEl)
+            .setName('Интервал проверки обновлений')
+            .setDesc('Как часто проверять наличие обновлений (в днях)')
+            .addText(text => text
+                .setPlaceholder('1')
+                .setValue(String(this.plugin.settings.updateCheckInterval || 1))
+                .onChange(async (value) => {
+                    const days = parseInt(value) || 1;
+                    this.plugin.settings.updateCheckInterval = days;
+                    await this.plugin.saveSettings();
+                })
+            );
+        
+        // Кнопка проверки обновлений
+        new Setting(containerEl)
+            .setName('Проверить обновления')
+            .setDesc('Проверить наличие обновлений плагина')
+            .addButton(button => button
+                .setButtonText('Проверить')
+                .onClick(async () => {
+                    button.setButtonText('Проверка...');
+                    button.setDisabled(true);
+                    
+                    try {
+                        await this.plugin.checkForUpdates(true);
+                    } catch (error) {
+                        console.error('Error checking for updates:', error);
+                    } finally {
+                        button.setButtonText('Проверить');
+                        button.setDisabled(false);
+                    }
+                })
+            );
         
         // Секция исключений
         containerEl.createEl('h3', { text: 'Исключения' });

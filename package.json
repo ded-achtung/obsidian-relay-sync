@@ -1,6 +1,6 @@
 {
   "name": "obsidian-relay-sync",
-  "version": "1.0.0",
+  "version": "1.2.0",
   "description": "Плагин для Obsidian, обеспечивающий надежную и безопасную синхронизацию между устройствами через сервер-маршрутизатор",
   "main": "main.js",
   "scripts": {
