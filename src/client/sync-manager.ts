@@ -3062,9 +3062,12 @@ export class SyncManager {
      * на основе сравнения локальных метаданных и метаданных с других устройств
      */
     private fileNeedsSync(path: string, metadata: FileMetadata, trustedDevices: DeviceInfo[]): {needsSync: boolean, isNew: boolean, targetDevices: string[]} {
-        // Файлы, измененные в последние 5 минут всегда считаются новыми
-        const fiveMinutesAgo = Date.now() - 5 * 60 * 1000;
-        const isNew = metadata.mtime > fiveMinutesAgo;
+        // Файлы, измененные в последние 10 минут считаются новыми (увеличиваем интервал)
+        const tenMinutesAgo = Date.now() - 10 * 60 * 1000;
+        const isNew = metadata.mtime > tenMinutesAgo;
+        
+        // Проверяем, не пустой ли файл, для пустых файлов уменьшаем приоритет синхронизации
+        const isEmptyFile = metadata.size === 0;
         
         // Устройства, которым нужно отправить файл
         const targetDevices: string[] = [];
@@ -3124,7 +3127,14 @@ export class SyncManager {
         } 
         // Если есть устройства, нуждающиеся в синхронизации
         else if (isNew && targetDevices.length > 0) {
-            needsSync = true;
+            // Для пустых файлов снижаем приоритет синхронизации
+            // и синхронизируем только если это новые изменения
+            if (isEmptyFile && metadata.mtime <= tenMinutesAgo) {
+                needsSync = false;
+                targetDevices.length = 0; // Очищаем список устройств
+            } else {
+                needsSync = true;
+            }
         }
         
         return { needsSync, isNew, targetDevices };
@@ -3545,11 +3555,16 @@ export class SyncManager {
                 this.fullSyncInterval = null;
             }
             
-            if (options.fullSyncInterval) {
+            if (options.fullSyncInterval && options.fullSyncInterval > 0) {
+                console.log(`Установка интервала полной синхронизации: ${options.fullSyncInterval / 60000} минут`);
+                
+                // Используем умную синхронизацию вместо полной для меньшей нагрузки
                 this.fullSyncInterval = setInterval(
-                    this.performFullSync.bind(this),
+                    this.performSmartSync.bind(this),
                     options.fullSyncInterval
                 );
+            } else {
+                console.log("Периодическая синхронизация отключена");
             }
         }
     }

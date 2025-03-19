@@ -349,13 +349,19 @@ export class RelaySyncSettingsTab extends PluginSettingTab {
         
         // Интервал полной синхронизации
         new Setting(containerEl)
-            .setName('Интервал полной синхронизации')
-            .setDesc('Интервал в минутах между полными синхронизациями (0 для отключения)')
+            .setName('Интервал синхронизации')
+            .setDesc('Интервал в минутах между синхронизациями (0 для отключения периодической синхронизации)')
             .addText(text => text
                 .setPlaceholder('30')
                 .setValue(String(Math.floor(this.plugin.settings.fullSyncInterval / 60000) || 0))
                 .onChange(async (value) => {
-                    const minutes = parseInt(value) || 0;
+                    // Ограничиваем минимальное значение интервала 5 минутами, если включено
+                    let minutes = parseInt(value) || 0;
+                    if (minutes > 0 && minutes < 5) {
+                        new Notice('Минимальный интервал синхронизации - 5 минут');
+                        minutes = 5;
+                        text.setValue(String(minutes));
+                    }
                     this.plugin.settings.fullSyncInterval = minutes * 60000;
                     await this.plugin.saveSettings();
                     this.plugin.updateSyncOptions();
