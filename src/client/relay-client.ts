@@ -624,6 +624,11 @@ export class RelayClient {
                     this.onMessageCallback(message);
                     break;
 
+                case "messageSent":
+                    // Подтверждение отправки сообщения от сервера
+                    console.log("Получено подтверждение отправки сообщения", message);
+                    break;
+                    
                 default:
                     // Все остальные типы сообщений
                     console.log("Получено сообщение неизвестного типа:", message.type);

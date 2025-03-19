@@ -529,6 +529,10 @@ export class SyncManager {
                                 let successCount = 0;
                                 for (const device of targetDevices) {
                                     const deviceId = typeof device === 'string' ? device : device.id;
+                                    
+                                    // Обрабатываем только одно изменение за раз для каждого устройства
+                                    await new Promise(resolve => setTimeout(resolve, 50));
+                                    
                                     const success = this.relayClient.sendMessage({
                                         type: 'fileSync',
                                         targetDeviceId: deviceId,
@@ -645,8 +649,11 @@ export class SyncManager {
             
             // Для маленьких файлов или специфичных запросов отправляем данные напрямую
             if (!isLargeFile || specificDevices) {
-                const sendPromises = targetDevices.map(async (device) => {
+                const sendPromises = targetDevices.map(async (device, index) => {
                     try {
+                        // Добавляем небольшую задержку между отправками разным устройствам
+                        await new Promise(resolve => setTimeout(resolve, index * 100));
+                        
                         const success = this.relayClient.sendMessage({
                             type: 'fileSync',
                             targetDeviceId: device.id,
@@ -1470,8 +1477,15 @@ export class SyncManager {
             console.log(`Отправка уведомления об удалении файла ${path} на ${trustedDevices.length} устройств...`);
             let successCount = 0;
             
-            for (const device of trustedDevices) {
+            // Отправляем уведомления последовательно с задержкой между ними
+            for (let i = 0; i < trustedDevices.length; i++) {
+                const device = trustedDevices[i];
                 try {
+                    // Добавляем задержку между сообщениями
+                    if (i > 0) {
+                        await new Promise(resolve => setTimeout(resolve, 200));
+                    }
+                    
                     console.log(`Отправка уведомления об удалении ${path} на устройство ${device.id}...`);
                     
                     this.relayClient.sendMessage({
